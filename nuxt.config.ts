@@ -3,7 +3,10 @@
 export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   nitro: {
-    // no special preset required; works on Node/Vercel/Netlify
+    preset: 'vercel'
+  },
+  routeRules: {
+    '/api/**': { runtime: 'nodejs' }
   },
   devtools: { enabled: false }
 })
