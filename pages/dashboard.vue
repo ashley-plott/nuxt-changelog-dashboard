@@ -1,123 +1,59 @@
-
 <!-- pages/dashboard.vue -->
 <script setup lang="ts">
-const sites = await $fetch('/api/sites')
-const siteOptions = computed(() => (sites?.sites || []).map((s:any)=>s.id))
-const selectedSite = ref(siteOptions.value[0] || '')
-const envOptions = computed(() => (sites?.sites || []).find((s:any)=>s.id===selectedSite.value)?.envs || [])
-const selectedEnv = ref(envOptions.value[0] || 'production')
-const limit = ref(25)
+const { data, pending, error, refresh } = await useFetch('/api/scheduler/overview')
 
-const from = ref('') // ISO date filter (optional)
-const to = ref('')
-const pkg = ref('')
-
-const { data, refresh, pending } = await useAsyncData(
-  'changelogs',
-  () => $fetch('/api/changelogs', { query: { site: selectedSite.value, env: selectedEnv.value, limit: limit.value, from: from.value || undefined, to: to.value || undefined, pkg: pkg.value || undefined } }),
-  { watch: [selectedSite, selectedEnv, limit, from, to, pkg] }
-)
+function monthName(m?: number) {
+  if (!m) return ''
+  return new Date(2000, m - 1, 1).toLocaleString(undefined, { month: 'long' })
+}
 </script>
 
 <template>
   <div class="p-6 space-y-6">
-    <div class="flex flex-wrap items-end gap-4">
-      <div>
-        <label class="block text-sm font-medium">Site</label>
-        <select v-model="selectedSite" class="border rounded px-3 py-2">
-          <option v-for="id in siteOptions" :key="id" :value="id">{{ id }}</option>
-        </select>
-      </div>
-      <div>
-        <label class="block text-sm font-medium">Environment</label>
-        <select v-model="selectedEnv" class="border rounded px-3 py-2">
-          <option v-for="e in envOptions" :key="e" :value="e">{{ e }}</option>
-        </select>
-      </div>
-      <div>
-        <label class="block text-sm font-medium">Limit</label>
-        <input v-model.number="limit" type="number" min="1" max="200" class="border rounded px-3 py-2 w-24" />
-      </div>
-
-      <div class="flex items-end gap-2">
-        <div>
-          <label class="block text-sm font-medium">From</label>
-          <input v-model="from" type="datetime-local" class="border rounded px-3 py-2" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium">To</label>
-          <input v-model="to" type="datetime-local" class="border rounded px-3 py-2" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium">Package</label>
-          <input v-model="pkg" placeholder="vendor/package" class="border rounded px-3 py-2" />
-        </div>
-      </div>
-
+    <div class="flex items-center gap-3 justify-between">
+      <h1 class="text-2xl font-bold">Sites</h1>
+      <div class="flex justify-center items-center gap-6">
       <button @click="refresh" class="ml-auto px-4 py-2 rounded bg-black text-white" :disabled="pending">Refresh</button>
+      <NuxtLink to="/sites" class="ml-auto px-4 py-2 rounded bg-black text-white">Add Site</NuxtLink>
+      </div>
     </div>
 
     <div v-if="pending">Loading…</div>
+    <div v-else-if="error" class="text-red-600">Failed to load sites.</div>
 
-    <div v-else class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      <div v-for="item in (data?.items || [])" :key="item.run?.timestamp" class="rounded-2xl border p-5 shadow-sm bg-white">
-        <div class="flex items-center justify-between">
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <NuxtLink
+        v-for="s in data?.sites || []"
+        :key="s.id"
+        :to="`/site/${s.id}`"
+        class="block rounded-2xl border p-5 shadow-sm bg-white transition hover:shadow-md"
+      >
+        <div class="flex items-start justify-between">
           <div>
-            <h2 class="text-lg font-semibold">{{ item.site?.name || item.site?.id }}</h2>
-            <p class="text-sm text-gray-500">
-              {{ item.site?.env }} • {{ new Date(item.run?.timestamp).toLocaleString() }}
-              <span v-if="item.run?.git_branch"> • {{ item.run.git_branch }}</span>
-              <span v-if="item.run?.git_sha"> ({{ item.run.git_sha }})</span>
-            </p>
+            <h2 class="text-lg font-semibold">{{ s.name || s.id }}</h2>
+            <p class="text-sm text-gray-500">{{ s.id }} • {{ s.env }}</p>
           </div>
-          <div class="flex gap-2">
-            <span class="px-2 py-1 rounded-full text-xs bg-blue-50 text-blue-700">
-              Updated: {{ item.summary?.updated_count || 0 }}
-            </span>
-            <span class="px-2 py-1 rounded-full text-xs bg-emerald-50 text-emerald-700">
-              Added: {{ item.summary?.added_count || 0 }}
-            </span>
-            <span class="px-2 py-1 rounded-full text-xs bg-rose-50 text-rose-700">
-              Removed: {{ item.summary?.removed_count || 0 }}
-            </span>
-          </div>
+          <span class="text-xs px-2 py-1 rounded-full bg-gray-100">
+            Renew: {{ monthName(s.renewMonth) }}
+          </span>
         </div>
 
-        <div v-if="item.summary?.has_changes" class="mt-4 overflow-auto">
-          <table class="min-w-full text-sm">
-            <thead>
-              <tr class="text-left border-b">
-                <th class="py-2 pr-4">Package</th>
-                <th class="py-2 pr-4">Old</th>
-                <th class="py-2 pr-4">New</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="p in item.changes?.updated || []" :key="p.name" class="border-b last:border-0">
-                <td class="py-2 pr-4 font-medium">{{ p.name }}</td>
-                <td class="py-2 pr-4"><code>{{ p.old }}</code></td>
-                <td class="py-2 pr-4"><code>{{ p.new }}</code></td>
-              </tr>
-              <tr v-for="p in item.changes?.added || []" :key="'a-'+p.name" class="border-b last:border-0">
-                <td class="py-2 pr-4 font-medium text-emerald-700">{{ p.name }}</td>
-                <td class="py-2 pr-4"><em>—</em></td>
-                <td class="py-2 pr-4"><code>{{ p.new }}</code></td>
-              </tr>
-              <tr v-for="p in item.changes?.removed || []" :key="'r-'+p.name" class="border-b last:border-0">
-                <td class="py-2 pr-4 font-medium text-rose-700">{{ p.name }}</td>
-                <td class="py-2 pr-4"><code>{{ p.old }}</code></td>
-                <td class="py-2 pr-4"><em>—</em></td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="mt-4 text-sm">
+          <p class="text-gray-500">Next maintenance</p>
+          <p class="mt-1 font-medium">
+            <span v-if="s.nextMaintenance">
+              {{ new Date(s.nextMaintenance).toLocaleDateString() }}
+              <span v-if="s.nextLabels?.preRenewal" class="ml-2 px-2 py-0.5 rounded text-xs bg-amber-50">Pre-renewal</span>
+              <span v-if="s.nextLabels?.midYear" class="ml-2 px-2 py-0.5 rounded text-xs bg-blue-50">Mid-year</span>
+            </span>
+            <span v-else class="text-gray-500">No upcoming date</span>
+          </p>
         </div>
 
-        <div v-else class="mt-4 text-sm text-gray-500">No dependency changes.</div>
-
-        <div class="mt-3 flex gap-3">
-          <a v-if="item.run?.ci_url" :href="item.run.ci_url" target="_blank" class="text-blue-600 hover:underline text-sm">CI build</a>
+        <div class="mt-4 flex gap-2 text-xs text-gray-500">
+          <span>Open details →</span>
         </div>
-      </div>
+      </NuxtLink>
     </div>
   </div>
 </template>
