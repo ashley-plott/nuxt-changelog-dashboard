@@ -1,19 +1,17 @@
 
-import { defineEventHandler, readBody, createError, getHeader } from 'h3'
+// server/api/scheduler/sites.post.ts (user roles)
+import { defineEventHandler, readBody, createError } from 'h3'
 import { getDb } from '../../utils/mongo'
 import { addMonths, firstOfMonthUTC, toISODate } from '../../utils/date'
+import { requireRole } from '../../utils/session'
 
-function requireAdmin(event) {
-  const k = process.env.NUXT_ADMIN_KEY || ''
-  const h = getHeader(event, 'x-admin-key') || ''
-  if (!k || h !== k) throw createError({ statusCode: 401, statusMessage: 'Unauthorized (x-admin-key missing or invalid)' })
-}
 function coerceRenewMonth(m?: any): number {
   const n = Number(m); if (!n || n < 1 || n > 12) return (new Date()).getUTCMonth() + 1; return n
 }
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireRole(event, ['manager', 'admin'])
+
   const body = await readBody(event)
   const id = (body?.id || '').trim()
   const name = (body?.name || id).trim()

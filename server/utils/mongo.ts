@@ -50,5 +50,16 @@ export async function getDb(): Promise<Db> {
     { name: 'pkg_removed_name' }
   )
 
+  // users indexes (moved from plugin)
+  await db.collection('users').createIndex(
+    { email: 1 }, 
+    { name: 'user_email_unique', unique: true }
+  )
+  await db.collection('users').createIndex(
+    { role: 1 }, 
+    { name: 'user_role' }
+  )
+
+
   return db
 }
