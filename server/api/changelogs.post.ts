@@ -1,7 +1,8 @@
+
 // server/api/changelogs.post.ts
-import { defineEventHandler, readBody, getHeader, createError } from 'h3'
-import { useStorage } from 'unstorage'
+import { defineEventHandler, readRawBody, createError, getHeader } from 'h3'
 import crypto from 'node:crypto'
+import { getDb } from '../utils/mongo'
 
 function verifyAuth(event) {
   const key = process.env.NUXT_API_KEY || ''
@@ -32,21 +33,31 @@ function verifyHmac(event, bodyStr: string) {
 
 export default defineEventHandler(async (event) => {
   verifyAuth(event)
-  const raw = await readBody(event)
-  const bodyStr = JSON.stringify(raw ?? {})
-  verifyHmac(event, bodyStr)
+  const rawBody = (await readRawBody(event)) || ''
+  verifyHmac(event, rawBody as string)
+  let body: any
+  try {
+    body = JSON.parse((rawBody as string) || '{}')
+  } catch (e) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid JSON body' })
+  }
 
-  const storage = useStorage()
-  const site = raw?.site?.id
-  const env  = raw?.site?.env || 'dev'
-  const ts   = raw?.run?.timestamp || new Date().toISOString()
+  const site = body?.site?.id
+  const env  = body?.site?.env || 'dev'
+  const ts   = body?.run?.timestamp || new Date().toISOString()
   if (!site) throw createError({ statusCode: 400, statusMessage: 'Missing site.id' })
 
-  const key = `data:changelogs/${site}/${env}/${ts}.json`
-  await storage.setItem(key, raw)
-
-  await storage.setItem(`data:latest/${site}/${env}.json`, raw)
-  await storage.setItem(`data:latest/${site}/_any.json`, raw)
+  const db = await getDb()
+  const doc = { ...body, _createdAt: new Date() }
+  try {
+    await db.collection('changelogs').updateOne(
+      { 'site.id': site, 'site.env': env, 'run.timestamp': ts },
+      { $set: doc },
+      { upsert: true }
+    )
+  } catch (e: any) {
+    throw createError({ statusCode: 500, statusMessage: 'DB error: ' + (e?.message || e) })
+  }
 
   return { ok: true, site, env, ts }
 })

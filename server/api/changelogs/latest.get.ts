@@ -1,11 +1,15 @@
+
 // server/api/changelogs/latest.get.ts
 import { defineEventHandler, getQuery, createError } from 'h3'
-import { useStorage } from 'unstorage'
+import { getDb } from '../../utils/mongo'
 
 export default defineEventHandler(async (event) => {
   const { site, env = 'dev' } = getQuery(event) as { site?: string; env?: string }
   if (!site) throw createError({ statusCode: 400, statusMessage: 'site query required' })
-  const storage = useStorage()
-  const data = await storage.getItem(`data:latest/${site}/${env}.json`)
-  return data || {}
+  const db = await getDb()
+  const doc = await db.collection('changelogs').findOne(
+    { 'site.id': site, 'site.env': env },
+    { sort: { 'run.timestamp': -1 } }
+  )
+  return doc || {}
 })

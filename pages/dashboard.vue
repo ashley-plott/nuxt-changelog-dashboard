@@ -1,3 +1,4 @@
+
 <!-- pages/dashboard.vue -->
 <script setup lang="ts">
 const sites = await $fetch('/api/sites')
@@ -7,10 +8,14 @@ const envOptions = computed(() => (sites?.sites || []).find((s:any)=>s.id===sele
 const selectedEnv = ref(envOptions.value[0] || 'production')
 const limit = ref(25)
 
+const from = ref('') // ISO date filter (optional)
+const to = ref('')
+const pkg = ref('')
+
 const { data, refresh, pending } = await useAsyncData(
   'changelogs',
-  () => $fetch('/api/changelogs', { query: { site: selectedSite.value, env: selectedEnv.value, limit: limit.value } }),
-  { watch: [selectedSite, selectedEnv, limit] }
+  () => $fetch('/api/changelogs', { query: { site: selectedSite.value, env: selectedEnv.value, limit: limit.value, from: from.value || undefined, to: to.value || undefined, pkg: pkg.value || undefined } }),
+  { watch: [selectedSite, selectedEnv, limit, from, to, pkg] }
 )
 </script>
 
@@ -33,6 +38,22 @@ const { data, refresh, pending } = await useAsyncData(
         <label class="block text-sm font-medium">Limit</label>
         <input v-model.number="limit" type="number" min="1" max="200" class="border rounded px-3 py-2 w-24" />
       </div>
+
+      <div class="flex items-end gap-2">
+        <div>
+          <label class="block text-sm font-medium">From</label>
+          <input v-model="from" type="datetime-local" class="border rounded px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">To</label>
+          <input v-model="to" type="datetime-local" class="border rounded px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Package</label>
+          <input v-model="pkg" placeholder="vendor/package" class="border rounded px-3 py-2" />
+        </div>
+      </div>
+
       <button @click="refresh" class="ml-auto px-4 py-2 rounded bg-black text-white" :disabled="pending">Refresh</button>
     </div>
 

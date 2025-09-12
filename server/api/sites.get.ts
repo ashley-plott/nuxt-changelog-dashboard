@@ -1,22 +1,14 @@
+
 // server/api/sites.get.ts
 import { defineEventHandler } from 'h3'
-import { useStorage } from 'unstorage'
+import { getDb } from '../utils/mongo'
 
 export default defineEventHandler(async () => {
-  const storage = useStorage()
-  const keys = await storage.getKeys('data:changelogs/')
-  const sites = new Map<string, Set<string>>()
-  for (const k of keys) {
-    // data:changelogs/<site>/<env>/<ts>.json
-    const parts = k.split('/')
-    if (parts.length >= 5) {
-      const site = parts[1]
-      const env  = parts[2]
-      if (!sites.has(site)) sites.set(site, new Set())
-      sites.get(site)!.add(env)
-    }
-  }
-  return {
-    sites: Array.from(sites.entries()).map(([id, envs]) => ({ id, envs: Array.from(envs) }))
-  }
+  const db = await getDb()
+  const agg = await db.collection('changelogs').aggregate([
+    { $group: { _id: '$site.id', envs: { $addToSet: '$site.env' } } },
+    { $project: { _id: 0, id: '$_id', envs: 1 } },
+    { $sort: { id: 1 } }
+  ]).toArray()
+  return { sites: agg }
 })

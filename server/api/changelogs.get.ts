@@ -1,20 +1,39 @@
+
 // server/api/changelogs.get.ts
 import { defineEventHandler, getQuery } from 'h3'
-import { useStorage } from 'unstorage'
+import { getDb } from '../utils/mongo'
 
-export default defineEventHandler(async (event) => {
+export default defineEventHandler( async (event) => {
   const q = getQuery(event)
   const site = (q.site as string) || null
   const env  = (q.env as string) || null
   const limit = Math.min(parseInt((q.limit as string) || '50', 10), 200)
+  const from = (q.from as string) || null
+  const to   = (q.to as string) || null
+  const pkg  = (q.pkg as string) || null // optional: filter by package name
 
-  const storage = useStorage()
-  const base = site
-    ? (env ? `data:changelogs/${site}/${env}/` : `data:changelogs/${site}/`)
-    : 'data:changelogs/'
+  const db = await getDb()
+  const coll = db.collection('changelogs')
 
-  const keys = await storage.getKeys(base)
-  const sorted = keys.sort().reverse().slice(0, limit)
-  const items = await Promise.all(sorted.map(k => storage.getItem(k)))
+  const filter: any = {}
+  if (site) filter['site.id'] = site
+  if (env)  filter['site.env'] = env
+  if (from || to) {
+    filter['run.timestamp'] = {}
+    if (from) filter['run.timestamp'].$gte = from
+    if (to)   filter['run.timestamp'].$lte = to
+  }
+  if (pkg) {
+    filter.$or = [
+      { 'changes.updated.name': pkg },
+      { 'changes.added.name': pkg },
+      { 'changes.removed.name': pkg },
+    ]
+  }
+
+  const items = await coll
+    .find(filter, { sort: { 'run.timestamp': -1 }, limit })
+    .toArray()
+
   return { items }
 })
