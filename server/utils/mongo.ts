@@ -71,9 +71,16 @@ export async function getDb(): Promise<Db> {
   )
 
   // changelogs
-await db.collection('changelogs').createIndex(
-  { 'site.id': 1, 'site.env': 1, receivedAt: -1 },
-  { name: 'changelogs_site_env_received' }
-)
+  await db.collection('changelogs').createIndex(
+    { 'site.id': 1, 'site.env': 1, receivedAt: -1 },
+    { name: 'changelogs_site_env_received' }
+  )
+
+  await db.collection('form_logs').createIndex(
+    { 'site.id': 1, 'site.env': 1, 'entry.created_at': -1, receivedAt: -1 },
+    { name: 'formlogs_site_env_time' }
+  )
+  await db.collection('form_logs').createIndex({ 'entry.email': 1 }, { name: 'formlogs_email' })
+  
   return db
 }
