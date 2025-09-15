@@ -60,6 +60,15 @@ export async function getDb(): Promise<Db> {
     { name: 'user_role' }
   )
 
+  await db.collection('notes').createIndex(
+    { 'site.id': 1, pinned: -1, updatedAt: -1 },
+    { name: 'notes_site_pin_updated' }
+  )
+  
+  await db.collection('notes').createIndex(
+    { 'author.id': 1, 'site.id': 1, createdAt: -1 },
+    { name: 'notes_author_site_created' }
+  )
 
   return db
 }
