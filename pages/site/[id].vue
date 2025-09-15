@@ -38,7 +38,6 @@ const my = authed ? me.user : null
 const selectedEnv = ref<string>('') // '' = All envs
 watchEffect(() => {
   if (site.value && selectedEnv.value === '') {
-    // default to the site's env, but user can change to All
     selectedEnv.value = site.value.env || ''
   }
 })
@@ -127,7 +126,7 @@ async function delNote(n:any) {
   await loadNotes()
 }
 
-// ---- Details (edit site) ----
+// ---- Details (edit site + rebuild maintenance) ----
 const canManageSite = computed(() => authed && (my.role === 'admin' || my.role === 'manager'))
 const det = reactive({ name: '', env: 'production', renewMonth: 1 })
 watchEffect(() => {
@@ -150,13 +149,47 @@ async function saveDetails() {
       body: { id, name: det.name, env: det.env, renewMonth: Number(det.renewMonth) },
       headers
     })
-    selectedEnv.value = det.env // keep filters in sync
+    selectedEnv.value = det.env
     await refreshSite()
     detMsg.value = 'Saved.'
   } catch (e:any) {
     detErr.value = e?.data?.message || e?.message || 'Failed to save'
   } finally {
     detSaving.value = false
+  }
+}
+
+// Rebuild maintenance CTA (with window controls)
+const rb = reactive({ backfillMonths: 12, forwardMonths: 14 })
+const rebuilding = ref(false)
+const rbMsg = ref<string|null>(null)
+const rbErr = ref<string|null>(null)
+
+async function rebuildMaintenance() {
+  if (!canManageSite.value) return
+  if (!confirm(`This will rebuild maintenance for ${det.name} (${det.env}). Continue?`)) return
+  rebuilding.value = true
+  rbMsg.value = rbErr.value = null
+  try {
+    const res = await $fetch('/api/scheduler/sites', {
+      method: 'POST',
+      body: {
+        id,
+        name: det.name,
+        env: det.env,
+        renewMonth: Number(det.renewMonth),
+        rebuild: true,
+        backfillMonths: Number(rb.backfillMonths),
+        forwardMonths: Number(rb.forwardMonths)
+      },
+      headers
+    })
+    await refreshSite()
+    rbMsg.value = `Rebuilt from ${res?.scheduleWindow?.from} to ${res?.scheduleWindow?.to} (${res?.scheduleWindow?.count || 0} dates).`
+  } catch (e:any) {
+    rbErr.value = e?.data?.message || e?.message || 'Failed to rebuild'
+  } finally {
+    rebuilding.value = false
   }
 }
 </script>
@@ -432,7 +465,8 @@ async function saveDetails() {
     <!-- Details -->
     <div v-show="tab==='details'">
       <h2 class="text-xl font-semibold mb-3">Site details</h2>
-      <div class="rounded-2xl border p-5 bg-white shadow-sm space-y-4">
+      <div class="rounded-2xl border p-5 bg-white shadow-sm space-y-6">
+        <!-- Basic fields -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium">Site ID</label>
@@ -460,7 +494,8 @@ async function saveDetails() {
           </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <!-- Actions -->
+        <div class="flex flex-wrap items-center gap-3">
           <button v-if="canManageSite" @click="saveDetails" :disabled="detSaving" class="px-4 py-2 rounded bg-black text-white">
             {{ detSaving ? 'Saving…' : 'Save details' }}
           </button>
@@ -469,9 +504,34 @@ async function saveDetails() {
           <p v-if="!canManageSite" class="text-sm text-gray-500">Sign in as a manager or admin to edit.</p>
         </div>
 
-        <p class="text-xs text-gray-500">
-          Saving updates the site and ensures upcoming maintenance entries exist.
-        </p>
+        <!-- Rebuild maintenance CTA -->
+        <div class="rounded-xl border p-4 bg-gray-50">
+          <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label class="block text-sm font-medium">Backfill months</label>
+              <input v-model.number="rb.backfillMonths" type="number" min="0" max="60" class="border rounded px-3 py-2 w-28" :disabled="!canManageSite || rebuilding" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium">Forward months</label>
+              <input v-model.number="rb.forwardMonths" type="number" min="0" max="60" class="border rounded px-3 py-2 w-28" :disabled="!canManageSite || rebuilding" />
+            </div>
+            <button
+              v-if="canManageSite"
+              @click="rebuildMaintenance"
+              :disabled="rebuilding"
+              class="ml-auto px-4 py-2 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+              title="Deletes and regenerates maintenance entries for this site & environment"
+            >
+              {{ rebuilding ? 'Rebuilding…' : 'Rebuild maintenance' }}
+            </button>
+          </div>
+          <p class="text-xs text-gray-600 mt-2">
+            Rebuild deletes existing maintenance entries for this site ({{ det.env }}) and recreates them every 2 months,
+            aligned to the pre-renewal month (one month before the renew month).
+          </p>
+          <p v-if="rbMsg" class="text-emerald-700 text-sm mt-2">{{ rbMsg }}</p>
+          <p v-if="rbErr" class="text-red-600 text-sm mt-2">{{ rbErr }}</p>
+        </div>
       </div>
     </div>
   </div>
