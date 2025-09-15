@@ -75,10 +75,5 @@ await db.collection('changelogs').createIndex(
   { 'site.id': 1, 'site.env': 1, receivedAt: -1 },
   { name: 'changelogs_site_env_received' }
 )
-await db.collection('changelogs').createIndex({ 'changes.updated.name': 1 }, { name: 'changelogs_pkg_updated' })
-await db.collection('changelogs').createIndex({ 'changes.added.name': 1 },   { name: 'changelogs_pkg_added' })
-await db.collection('changelogs').createIndex({ 'changes.removed.name': 1 }, { name: 'changelogs_pkg_removed' })
-
-
   return db
 }
