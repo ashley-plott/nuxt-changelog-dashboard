@@ -1,3 +1,4 @@
+import { title } from "process";
 
 // nuxt.config.ts
 export default defineNuxtConfig({
@@ -7,6 +8,11 @@ export default defineNuxtConfig({
   },
   routeRules: {
     '/api/**': { runtime: 'nodejs' }
+  },
+  app:{
+    head: {
+      title: 'PLOTT Maintenance'
+    }
   },
   devtools: { enabled: false }
 })

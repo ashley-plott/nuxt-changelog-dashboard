@@ -13,8 +13,26 @@ interface MaintItem {
   kind?: 'maintenance' | 'report'
   labels?: { preRenewal?: boolean; reportDue?: boolean; midYear?: boolean }
 }
-interface ChangelogEntry { _id?: string; site?: any; run?: any; receivedAt?: string; summary?: any; changes?: any }
-interface FormLog { _id?: string; site?: any; form?: any; entry?: any; fields?: Record<string,string>; run?: any }
+interface ChangelogEntry {
+  _id?: string
+  site?: { id: string; env: string }
+  run?: { timestamp?: string; git_branch?: string; git_sha?: string; ci_url?: string }
+  receivedAt?: string
+  summary?: { updated_count?: number; added_count?: number; removed_count?: number; has_changes?: boolean }
+  changes?: {
+    updated?: Array<{ name: string; old: string; new: string }>
+    added?: Array<{ name: string; new: string }>
+    removed?: Array<{ name: string; old: string }>
+  }
+}
+interface FormLog {
+  _id?: string
+  site?: { id: string; env: string }
+  form?: { id?: number; title?: string }
+  entry?: { email?: string; created_at?: string }
+  fields?: Record<string, string>
+  run?: { php_version?: string; wp_version?: string; gf_version?: string }
+}
 
 const route = useRoute()
 const id = route.params.id as string
@@ -201,7 +219,7 @@ defineExpose({ refreshSite })
       </div>
     </div>
 
-    <!-- States -->
+    <!-- Loading / Error -->
     <div v-if="pending" class="rounded-2xl border bg-white p-8 text-center text-sm text-gray-500 shadow-sm">Loading…</div>
     <div v-else-if="error" class="rounded-2xl border bg-white p-8 text-center text-sm text-red-600 shadow-sm">Failed to load site.</div>
 
@@ -239,26 +257,225 @@ defineExpose({ refreshSite })
 
     <!-- Changelog -->
     <div v-show="tab==='changelog'" class="space-y-3">
-      <!-- (unchanged table & filters from your version) -->
-      <!-- ... keep your existing changelog template ... -->
+      <h2 class="text-lg font-semibold">Changelog</h2>
+      <div class="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div class="md:col-span-1">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Environment</label>
+            <select v-model="selectedEnv" class="w-full rounded-lg border px-3 py-2">
+              <option value="">All</option>
+              <option :value="site?.env">{{ site?.env }}</option>
+            </select>
+          </div>
+          <div class="md:col-span-1">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Package</label>
+            <input v-model="clPkg" placeholder="vendor/package" class="w-full rounded-lg border px-3 py-2" />
+          </div>
+          <div class="md:col-span-1">
+            <label class="block text-xs font-medium text-gray-600 mb-1">From</label>
+            <input v-model="clFrom" type="datetime-local" class="w-full rounded-lg border px-3 py-2" />
+          </div>
+          <div class="md:col-span-1">
+            <label class="block text-xs font-medium text-gray-600 mb-1">To</label>
+            <input v-model="clTo" type="datetime-local" class="w-full rounded-lg border px-3 py-2" />
+          </div>
+          <div class="md:col-span-1 flex items-end gap-2">
+            <input v-model.number="clLimit" type="number" min="1" class="w-24 rounded-lg border px-3 py-2" />
+            <button @click="clRefresh" class="ml-auto inline-flex items-center rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50" :disabled="clPending">Refresh</button>
+          </div>
+        </div>
+
+        <div v-if="clPending" class="text-sm text-gray-500">Loading changes…</div>
+        <div v-else-if="(clData?.items || []).length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-gray-500">No changelog entries.</div>
+
+        <div v-else class="space-y-4">
+          <div v-for="(entry, idx) in clData?.items || []" :key="entry._id || entry.run?.timestamp || idx" class="rounded-xl border p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="font-medium">{{ new Date(entry.run?.timestamp || entry.receivedAt).toLocaleString() }}</div>
+                <div class="text-xs text-gray-500">
+                  {{ entry.site?.env }}
+                  <span v-if="entry.run?.git_branch"> • {{ entry.run.git_branch }}</span>
+                  <span v-if="entry.run?.git_sha"> ({{ entry.run.git_sha }})</span>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="inline-flex items-center rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700">Updated: {{ entry.summary?.updated_count || 0 }}</span>
+                <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">Added: {{ entry.summary?.added_count || 0 }}</span>
+                <span class="inline-flex items-center rounded-full bg-rose-50 px-2 py-1 text-xs text-rose-700">Removed: {{ entry.summary?.removed_count || 0 }}</span>
+              </div>
+            </div>
+
+            <div v-if="entry.summary?.has_changes" class="mt-3 overflow-auto rounded-lg border">
+              <table class="min-w-full text-sm">
+                <thead class="bg-gray-50">
+                  <tr class="text-left">
+                    <th class="py-2 pl-3 pr-4 font-medium text-gray-600">Package</th>
+                    <th class="py-2 pr-4 font-medium text-gray-600">Old</th>
+                    <th class="py-2 pr-4 font-medium text-gray-600">New</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="p in entry.changes?.updated || []" :key="'u-'+p.name" class="border-t">
+                    <td class="py-2 pl-3 pr-4 font-medium">{{ p.name }}</td>
+                    <td class="py-2 pr-4"><code>{{ p.old }}</code></td>
+                    <td class="py-2 pr-4"><code>{{ p.new }}</code></td>
+                  </tr>
+                  <tr v-for="p in entry.changes?.added || []" :key="'a-'+p.name" class="border-t">
+                    <td class="py-2 pl-3 pr-4 font-medium text-emerald-700">{{ p.name }}</td>
+                    <td class="py-2 pr-4"><em>—</em></td>
+                    <td class="py-2 pr-4"><code>{{ p.new }}</code></td>
+                  </tr>
+                  <tr v-for="p in entry.changes?.removed || []" :key="'r-'+p.name" class="border-t">
+                    <td class="py-2 pl-3 pr-4 font-medium text-rose-700">{{ p.name }}</td>
+                    <td class="py-2 pr-4"><code>{{ p.old }}</code></td>
+                    <td class="py-2 pr-4"><em>—</em></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="mt-3 text-sm text-gray-500">No dependency changes.</div>
+
+            <div class="mt-2">
+              <a v-if="entry.run?.ci_url" :href="entry.run.ci_url" target="_blank" class="text-blue-600 hover:underline text-sm">CI build</a>
+            </div>
+          </div>
+
+          <div class="flex justify-center">
+            <button @click="moreChangelogs" class="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50">Load more</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Forms -->
     <div v-show="tab==='forms'" class="space-y-3">
-      <!-- (unchanged filters/table from your version) -->
-      <!-- ... keep your existing forms template ... -->
+      <h2 class="text-lg font-semibold">Forms</h2>
+      <div class="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Environment</label>
+            <select v-model="selectedEnv" class="w-full rounded-lg border px-3 py-2">
+              <option value="">All</option>
+              <option :value="site?.env">{{ site?.env }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Email</label>
+            <input v-model="flEmail" placeholder="name@plott.co.uk" class="w-full rounded-lg border px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">From</label>
+            <input v-model="flFrom" type="datetime-local" class="w-full rounded-lg border px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">To</label>
+            <input v-model="flTo" type="datetime-local" class="w-full rounded-lg border px-3 py-2" />
+          </div>
+          <div class="flex items-end gap-2">
+            <input v-model.number="flLimit" type="number" min="1" class="w-24 rounded-lg border px-3 py-2" />
+            <button @click="flRefresh" class="ml-auto inline-flex items-center rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50" :disabled="flPending">Refresh</button>
+          </div>
+        </div>
+
+        <div v-if="flPending" class="text-sm text-gray-500">Loading submissions…</div>
+        <div v-else-if="(flData?.items || []).length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-gray-500">No form submissions.</div>
+
+        <div v-else class="space-y-4">
+          <div v-for="(log, i) in flData?.items || []" :key="log._id || i" class="rounded-xl border p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="font-medium">{{ new Date(log.entry?.created_at || log.receivedAt).toLocaleString() }}</div>
+                <div class="text-xs text-gray-500">{{ log.form?.title || 'Form' }} • {{ log.entry?.email }}</div>
+              </div>
+              <span class="px-2 py-1 rounded-full text-xs bg-purple-50 text-purple-700">GF submission</span>
+            </div>
+
+            <div class="mt-3 overflow-auto rounded-lg border">
+              <table class="min-w-full text-sm">
+                <thead class="bg-gray-50">
+                  <tr class="text-left">
+                    <th class="py-2 pl-3 pr-4 font-medium text-gray-600">Field</th>
+                    <th class="py-2 pr-4 font-medium text-gray-600">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(val, label) in (log.fields || {})" :key="label" class="border-t align-top">
+                    <td class="py-2 pl-3 pr-4 font-medium">{{ label }}</td>
+                    <td class="py-2 pr-4 break-all">{{ val }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p class="text-xs text-gray-500 mt-2">
+              PHP {{ log.run?.php_version }} • WP {{ log.run?.wp_version }} • GF {{ log.run?.gf_version }}
+            </p>
+          </div>
+
+          <div class="flex justify-center">
+            <button @click="moreForms" class="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50">Load more</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Notes -->
     <div v-show="tab==='notes'" class="space-y-3">
-      <!-- (unchanged notes UI from your version) -->
-      <!-- ... keep your existing notes template ... -->
+      <h2 class="text-lg font-semibold">Notes</h2>
+      <div v-if="authed" class="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
+          <input v-model="noteForm.title" placeholder="Title" class="border rounded-lg px-3 py-2 md:col-span-3" />
+          <label class="inline-flex items-center gap-2 text-sm md:col-span-1">
+            <input type="checkbox" v-model="noteForm.pinned" /> Pinned
+          </label>
+        </div>
+        <textarea v-model="noteForm.body" rows="4" placeholder="Write a note…" class="border rounded-lg px-3 py-2 w-full"></textarea>
+        <div class="flex gap-3">
+          <button @click="addNote" :disabled="noteSaving" class="rounded-lg bg-black px-4 py-2 text-white">
+            {{ noteSaving ? 'Saving…' : 'Add note' }}
+          </button>
+          <button @click="loadNotes" class="rounded-lg border px-4 py-2 hover:bg-gray-50">Refresh</button>
+        </div>
+      </div>
+      <div v-else class="rounded-2xl border bg-white p-5 text-sm text-gray-500 shadow-sm">
+        Sign in to add and manage notes.
+      </div>
+
+      <div class="space-y-3">
+        <div v-if="!notes?.items" class="flex justify-center">
+          <button @click="loadNotes" class="rounded-lg border px-4 py-2 hover:bg-gray-50">Load notes</button>
+        </div>
+        <div v-else-if="notes.items.length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-gray-500 bg-white shadow-sm">
+          No notes yet.
+        </div>
+
+        <div v-else v-for="n in notes.items" :key="n._id" class="rounded-xl border bg-white p-4 shadow-sm">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-semibold">{{ n.title || 'Untitled' }}</h3>
+                <span v-if="n.pinned" class="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-800 border border-amber-100">Pinned</span>
+              </div>
+              <p class="whitespace-pre-wrap text-sm mt-1">{{ n.body }}</p>
+              <p class="text-xs text-gray-500 mt-2">
+                by {{ n.author?.name || n.author?.email }} • {{ new Date(n.updatedAt).toLocaleString() }}
+              </p>
+            </div>
+            <div v-if="canEditNote(n)" class="shrink-0 flex gap-2">
+              <button @click="saveNote(n, { pinned: !n.pinned })" class="text-xs underline">{{ n.pinned ? 'Unpin' : 'Pin' }}</button>
+              <button @click="delNote(n)" class="text-xs text-red-600 underline">Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Details -->
     <div v-show="tab==='details'" class="space-y-3">
       <h2 class="text-lg font-semibold">Site details</h2>
       <div class="rounded-2xl border bg-white p-5 shadow-sm space-y-6">
+        <!-- Basic fields -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-medium text-gray-600 mb-1">Site ID</label>
