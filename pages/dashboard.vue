@@ -114,7 +114,7 @@ const thisMonth = computed(() => monthsOverview.value[0])
             <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.maintenance.length }}</span>
           </div>
           <div class="mt-3 space-y-2" v-if="thisMonth.maintenance.length">
-            <NuxtLink v-for="s in thisMonth.maintenance.slice(0,10)" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
+            <NuxtLink v-for="s in thisMonth.maintenance" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
               <div class="min-w-0">
                 <div class="truncate font-medium">{{ s.name || s.id }}</div>
                 <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
@@ -124,7 +124,6 @@ const thisMonth = computed(() => monthsOverview.value[0])
                 <span v-if="s.midYear" class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-100">Mid-year</span>
               </div>
             </NuxtLink>
-            <p v-if="thisMonth.maintenance.length > 10" class="text-xs text-gray-500">…and {{ thisMonth.maintenance.length - 10 }} more</p>
           </div>
           <p v-else class="text-sm text-gray-500">No maintenance scheduled this month.</p>
         </div>
@@ -136,14 +135,13 @@ const thisMonth = computed(() => monthsOverview.value[0])
             <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.reports.length }}</span>
           </div>
           <div class="mt-3 space-y-2" v-if="thisMonth.reports.length">
-            <NuxtLink v-for="s in thisMonth.reports.slice(0,10)" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
+            <NuxtLink v-for="s in thisMonth.reports" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
               <div class="min-w-0">
                 <div class="truncate font-medium">{{ s.name || s.id }}</div>
                 <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
               </div>
               <span class="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">Report</span>
             </NuxtLink>
-            <p v-if="thisMonth.reports.length > 10" class="text-xs text-gray-500">…and {{ thisMonth.reports.length - 10 }} more</p>
           </div>
           <p v-else class="text-sm text-gray-500">No reports due this month.</p>
         </div>
@@ -155,14 +153,13 @@ const thisMonth = computed(() => monthsOverview.value[0])
             <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.renewals.length }}</span>
           </div>
           <div class="mt-3 space-y-2" v-if="thisMonth.renewals.length">
-            <NuxtLink v-for="s in thisMonth.renewals.slice(0,10)" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
+            <NuxtLink v-for="s in thisMonth.renewals" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
               <div class="min-w-0">
                 <div class="truncate font-medium">{{ s.name || s.id }}</div>
                 <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
               </div>
               <span class="text-xs text-gray-600">{{ monthName(s.renewMonth) }}</span>
             </NuxtLink>
-            <p v-if="thisMonth.renewals.length > 10" class="text-xs text-gray-500">…and {{ thisMonth.renewals.length - 10 }} more</p>
           </div>
           <p v-else class="text-sm text-gray-500">No renewals this month.</p>
         </div>
@@ -186,14 +183,13 @@ const thisMonth = computed(() => monthsOverview.value[0])
               <div>
                 <div class="text-xs font-medium text-gray-600 mb-1">Maintenance</div>
                 <div v-if="m.maintenance.length" class="space-y-1">
-                  <NuxtLink v-for="s in m.maintenance.slice(0,4)" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
+                  <NuxtLink v-for="s in m.maintenance" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
                     <div class="truncate">{{ s.name || s.id }}</div>
                     <div class="flex gap-2 text-[11px]">
                       <span v-if="s.preRenewal" class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-100">Pre</span>
                       <span v-if="s.midYear" class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100">Mid</span>
                     </div>
                   </NuxtLink>
-                  <div v-if="m.maintenance.length > 4" class="text-xs text-gray-500">…and {{ m.maintenance.length - 4 }} more</div>
                 </div>
                 <div v-else class="text-xs text-gray-500">No maintenance.</div>
               </div>
@@ -201,11 +197,10 @@ const thisMonth = computed(() => monthsOverview.value[0])
               <div>
                 <div class="text-xs font-medium text-gray-600 mb-1">Reports</div>
                 <div v-if="m.reports.length" class="space-y-1">
-                  <NuxtLink v-for="s in m.reports.slice(0,4)" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
+                  <NuxtLink v-for="s in m.reports" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
                     <div class="truncate">{{ s.name || s.id }}</div>
                     <span class="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">Report</span>
                   </NuxtLink>
-                  <div v-if="m.reports.length > 4" class="text-xs text-gray-500">…and {{ m.reports.length - 4 }} more</div>
                 </div>
                 <div v-else class="text-xs text-gray-500">No reports.</div>
               </div>
@@ -213,11 +208,10 @@ const thisMonth = computed(() => monthsOverview.value[0])
               <div>
                 <div class="text-xs font-medium text-gray-600 mb-1">Renewals</div>
                 <div v-if="m.renewals.length" class="space-y-1">
-                  <NuxtLink v-for="s in m.renewals.slice(0,4)" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
+                  <NuxtLink v-for="s in m.renewals" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
                     <div class="truncate">{{ s.name || s.id }}</div>
                     <span class="text-[11px] text-gray-600">{{ monthName(s.renewMonth) }}</span>
                   </NuxtLink>
-                  <div v-if="m.renewals.length > 4" class="text-xs text-gray-500">…and {{ m.renewals.length - 4 }} more</div>
                 </div>
                 <div v-else class="text-xs text-gray-500">No renewals.</div>
               </div>
@@ -232,8 +226,8 @@ const thisMonth = computed(() => monthsOverview.value[0])
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div class="lg:col-span-6">
             <div class="relative">
+              <label class="block text-xs text-gray-500 mb-1">Search Client</label>
               <input v-model="q" type="search" placeholder="Search sites…" class="w-full border rounded-xl px-4 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10" />
-              <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">⌘K</div>
             </div>
           </div>
           <div class="lg:col-span-3">
@@ -244,7 +238,7 @@ const thisMonth = computed(() => monthsOverview.value[0])
               <option value="renew-desc">Next maintenance ↓</option>
             </select>
           </div>
-          <div class="lg:col-span-1">
+          <div class="lg:col-span-3">
             <label class="block text-xs text-gray-500 mb-1">Env</label>
             <select v-model="envFilter" class="w-full border rounded-xl px-3 py-2.5 bg-white shadow-sm">
               <option value="all">All</option>

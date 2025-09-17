@@ -18,8 +18,8 @@ function normalizeUrl(u?: string): string {
 
 // Cadence:
 //   Renewal month R (1..12) -> index r = R-1 (0..11)
-//   Reports due   = r-1 (R-1)
-//   Pre-renewal   = r-2 (R-2)
+//   Pre-renewal   = r-2 (R-2)  ← cadence anchor (every 2 months)
+//   Reports due   = r-1 (R-1)  ← single month per year, not on cadence
 //   Mid-year      = (pre + 6) % 12
 export default defineEventHandler(async (event) => {
   await requireRole(event, ['manager', 'admin'])
@@ -28,8 +28,8 @@ export default defineEventHandler(async (event) => {
   const id = (body?.id || '').trim()
   if (!id) throw createError({ statusCode: 400, statusMessage: 'Missing site id' })
 
-  const name = (body?.name || id).trim()
-  const env = (body?.env || 'production').trim()
+  const name       = (body?.name || id).trim()
+  const env        = (body?.env || 'production').trim()
   const renewMonth = coerceRenewMonth(body?.renewMonth)
 
   // Optionals
@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
       }
     : null
 
-  // Rebuild window options
+  // Window & rebuild options
   const rebuild        = !!body?.rebuild
   const backfillMonths = Math.max(0, Math.min(60, Number(body?.backfillMonths ?? 12)))
   const forwardMonths  = Math.max(0, Math.min(60, Number(body?.forwardMonths  ?? 14)))
@@ -78,51 +78,76 @@ export default defineEventHandler(async (event) => {
     await db.collection('maintenance').deleteMany({ 'site.id': id, 'site.env': env })
   }
 
-  // Build generation window (month start)
+  // ----- Build generation window -----
   const thisMonthStart = firstOfMonthUTC(now.getUTCFullYear(), now.getUTCMonth())
   const windowStart    = addMonths(thisMonthStart, -backfillMonths)
   const windowEnd      = addMonths(thisMonthStart,  forwardMonths)
+  const stop           = firstOfMonthUTC(windowEnd.getUTCFullYear(), windowEnd.getUTCMonth() + 1)
 
-  // Indices
+  // ----- Indices -----
   const rIdx      = (renewMonth - 1 + 12) % 12
-  const reportIdx = (rIdx - 1 + 12) % 12
   const preIdx    = (rIdx - 2 + 12) % 12
+  const reportIdx = (rIdx - 1 + 12) % 12
   const midIdx    = (preIdx + 6) % 12
 
-  // Walk month-by-month from first-of-windowStart to first-of-(windowEnd+1)
   const planned: Array<{ date: string, kind: 'maintenance'|'report', labels: any }> = []
   const ops: Promise<any>[] = []
 
-  let cursor = firstOfMonthUTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth())
-  const stop = firstOfMonthUTC(windowEnd.getUTCFullYear(), windowEnd.getUTCMonth() + 1)
+  // ----- 1) Two-month cadence anchored to preIdx (all 'maintenance') -----
+  // Find first cadence date <= windowStart at month preIdx
+  let cadence = firstOfMonthUTC(windowStart.getUTCFullYear(), preIdx)
+  if (cadence > windowStart) cadence = firstOfMonthUTC(windowStart.getUTCFullYear() - 1, preIdx)
 
-  while (cursor < stop) {
-    const m = cursor.getUTCMonth()
-    const onPre    = m === preIdx
-    const onReport = m === reportIdx
-    const onMid    = m === midIdx
-
-    if (onPre || onReport || onMid) {
-      const dISO = toISODate(cursor)
-      const labels = { preRenewal: onPre, reportDue: onReport, midYear: onMid }
-      const ev = {
-        site: { id, name, env },
-        date: dISO,
-        labels,
-        kind: onReport ? 'report' : 'maintenance',
-        createdAt: now
-      }
-      planned.push({ date: dISO, kind: ev.kind, labels })
-      ops.push(
-        db.collection('maintenance').updateOne(
-          { 'site.id': id, 'site.env': env, date: dISO },
-          rebuild ? { $set: ev } : { $setOnInsert: ev },
-          { upsert: true }
-        )
-      )
+  for (let d = cadence; d < stop; d = addMonths(d, 2)) {
+    if (d < windowStart) continue
+    const m = d.getUTCMonth()
+    const labels = {
+      preRenewal: m === preIdx,
+      reportDue:  false,             // not on cadence
+      midYear:    m === midIdx
     }
+    const ev = {
+      site: { id, name, env },
+      date: toISODate(d),
+      labels,
+      kind: 'maintenance' as const,
+      createdAt: now
+    }
+    planned.push({ date: ev.date, kind: ev.kind, labels })
+    ops.push(
+      db.collection('maintenance').updateOne(
+        { 'site.id': id, 'site.env': env, date: ev.date },
+        rebuild ? { $set: ev } : { $setOnInsert: ev },
+        { upsert: true }
+      )
+    )
+  }
 
-    cursor = addMonths(cursor, 1)
+  // ----- 2) Report months (R−1) as standalone 'report' items -----
+  // Walk month-by-month only to hit reportIdx once per year within the window
+  for (let d = firstOfMonthUTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth()); d < stop; d = addMonths(d, 1)) {
+    if (d.getUTCMonth() !== reportIdx) continue
+    const m = d.getUTCMonth()
+    const labels = {
+      preRenewal: m === preIdx,
+      reportDue:  true,
+      midYear:    m === midIdx
+    }
+    const ev = {
+      site: { id, name, env },
+      date: toISODate(d),
+      labels,
+      kind: 'report' as const,
+      createdAt: now
+    }
+    planned.push({ date: ev.date, kind: ev.kind, labels })
+    ops.push(
+      db.collection('maintenance').updateOne(
+        { 'site.id': id, 'site.env': env, date: ev.date },
+        rebuild ? { $set: ev } : { $setOnInsert: ev },
+        { upsert: true }
+      )
+    )
   }
 
   await Promise.all(ops)

@@ -14,5 +14,5 @@ export default defineNuxtConfig({
       title: 'PLOTT Maintenance'
     }
   },
-  devtools: { enabled: false }
+  devtools: { enabled: true }
 })
