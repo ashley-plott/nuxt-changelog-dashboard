@@ -67,6 +67,21 @@ const me = await $fetch<{ authenticated: boolean; user?: any }>('/api/auth/me', 
 const authed = !!me?.authenticated
 const my = authed ? me.user : null
 
+// ----- DISPLAY HELPERS (Website/Git/contact + renewal visibility) -----
+const displayWebsiteUrl = computed(() => {
+  const s = site.value as any
+  return (s?.websiteUrl || s?.url || '') as string
+})
+const displayGitUrl = computed(() => site.value?.gitUrl || '')
+const displayContact = computed<PrimaryContact | null>(() => site.value?.primaryContact || null)
+
+function isRenewalMonthUTC(monthStartUTC: Date) {
+  const r = Number(site.value?.renewMonth || 0)
+  if (!r) return false
+  // months[] are UTC dates; compare UTC month to (renewMonth-1)
+  return monthStartUTC.getUTCMonth() === (r - 1)
+}
+
 // Changelog
 const selectedEnv = ref<string>(''); watchEffect(() => { if (site.value && selectedEnv.value === '') selectedEnv.value = site.value.env || '' })
 const clLimit = ref(20); const clPkg = ref(''); const clFrom = ref(''); const clTo = ref('')
@@ -121,7 +136,7 @@ const det = reactive({ name:'', env: 'production' as SiteDoc['env'], renewMonth:
 watchEffect(() => {
   const s = site.value; if(!s) return
   det.name = s.name || ''; det.env = (s.env as any)||'production'; det.renewMonth = Number(s.renewMonth||1)
-  det.websiteUrl = s.websiteUrl || (s as any).url || ''; det.gitUrl = s.gitUrl || ''
+  det.websiteUrl = (s.websiteUrl || (s as any).url || ''); det.gitUrl = s.gitUrl || ''
   det.contactName = s.primaryContact?.name || ''; det.contactEmail = s.primaryContact?.email || ''; det.contactPhone = s.primaryContact?.phone || ''
 })
 const detSaving = ref(false); const detMsg = ref<string|null>(null); const detErr = ref<string|null>(null)
@@ -161,7 +176,7 @@ async function rebuildMaintenance(){
 // Favicon helpers
 const siteInitial = computed(() => (site.value?.name || site.value?.id || id).slice(0,1).toUpperCase())
 const siteHostname = computed(() => {
-  const raw = site.value?.websiteUrl || (site.value as any)?.url || ''
+  const raw = displayWebsiteUrl.value // already handles websiteUrl || url
   try { return raw ? new URL(raw).hostname : '' } catch { return '' }
 })
 const favPrimary  = computed(() => siteHostname.value ? `https://www.google.com/s2/favicons?sz=64&domain=${siteHostname.value}` : '')
@@ -191,11 +206,28 @@ defineExpose({ refreshSite })
         </div>
         <div class="min-w-0">
           <h1 class="text-2xl font-bold truncate">{{ site?.name || site?.id || id }}</h1>
+
+          <!-- Links line (with robust fallbacks) -->
           <p class="mt-1 text-xs text-gray-500 truncate">
             {{ site?.id || id }}
             <span v-if="site?.env"> • <span class="capitalize">{{ site.env }}</span></span>
-            <span v-if="site?.websiteUrl"> • <a :href="site.websiteUrl" target="_blank" class="hover:underline">Website</a></span>
-            <span v-if="site?.gitUrl"> • <a :href="site.gitUrl" target="_blank" class="hover:underline">Repo</a></span>
+            <span v-if="displayWebsiteUrl"> • <a :href="displayWebsiteUrl" target="_blank" class="hover:underline">Website</a></span>
+            <span v-if="displayGitUrl"> • <a :href="displayGitUrl" target="_blank" class="hover:underline">Repo</a></span>
+          </p>
+
+          <!-- Contact line -->
+          <p
+            v-if="displayContact?.name || displayContact?.email || displayContact?.phone"
+            class="mt-1 text-xs text-gray-500 truncate"
+          >
+            Contact:
+            <span v-if="displayContact?.name">{{ displayContact.name }}</span>
+            <span v-if="displayContact?.email">
+              • <a :href="`mailto:${displayContact.email}`" class="hover:underline">{{ displayContact.email }}</a>
+            </span>
+            <span v-if="displayContact?.phone">
+              • <a :href="`tel:${displayContact.phone}`" class="hover:underline">{{ displayContact.phone }}</a>
+            </span>
           </p>
         </div>
         <div class="ml-auto flex flex-wrap items-center gap-2">
@@ -230,6 +262,8 @@ defineExpose({ refreshSite })
         <div v-for="m in months" :key="m.start.toISOString()" class="rounded-2xl border bg-white p-5 shadow-sm">
           <div class="flex items-center justify-between">
             <h3 class="text-base font-semibold">{{ formatMonth(m.start) }}</h3>
+            <!-- Renewal pill for the month matching renewMonth -->
+            <span v-if="isRenewalMonthUTC(m.start)" class="rounded-full border px-2 py-0.5 text-xs bg-emerald-50 text-emerald-700">Renewal</span>
           </div>
           <div class="mt-4 space-y-2">
             <div
@@ -249,7 +283,9 @@ defineExpose({ refreshSite })
                 <span v-if="ev.labels?.midYear"    class="px-2 py-0.5 rounded-full text-xs bg-blue-50   text-blue-800   border border-blue-100">Mid-year</span>
               </div>
             </div>
-            <div v-if="!items.some(it => inMonth(it, m))" class="rounded-xl border border-dashed px-3 py-6 text-center text-sm text-gray-500">No maintenance scheduled.</div>
+            <div v-if="!items.some(it => inMonth(it, m))" class="rounded-xl border border-dashed px-3 py-6 text-center text-sm text-gray-500">
+              No maintenance scheduled.
+            </div>
           </div>
         </div>
       </div>

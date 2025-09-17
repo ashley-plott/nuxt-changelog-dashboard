@@ -271,6 +271,27 @@ const thisMonth = computed(() => monthsOverview.value[0])
                 </div>
                 <div>
                   <h3 class="text-base font-semibold leading-tight">{{ s.name || s.id }}</h3>
+                  <div class="flex items-center gap-2 text-[11px] text-gray-500 truncate mt-0.5">
+                    <span v-if="s.websiteUrl">
+                      <a :href="s.websiteUrl" target="_blank" class="hover:underline">Website</a>
+                    </span>
+                    <span v-if="s.gitUrl">
+                      <span v-if="s.websiteUrl" class="opacity-50">•</span>
+                      <a :href="s.gitUrl" target="_blank" class="hover:underline">Repo</a>
+                    </span>
+                    <span v-if="s.primaryContact?.email || s.primaryContact?.name || s.primaryContact?.phone">
+                      <span v-if="s.websiteUrl || s.gitUrl" class="opacity-50">•</span>
+                      <span class="truncate">
+                        {{ s.primaryContact?.name || 'Contact' }}
+                        <template v-if="s.primaryContact?.email">
+                          — <a :href="`mailto:${s.primaryContact.email}`" class="hover:underline">{{ s.primaryContact.email }}</a>
+                        </template>
+                        <template v-else-if="s.primaryContact?.phone">
+                          — <a :href="`tel:${s.primaryContact.phone}`" class="hover:underline">{{ s.primaryContact.phone }}</a>
+                        </template>
+                      </span>
+                    </span>
+                  </div>
                   <div class="flex items-center gap-2 text-xs text-gray-500">
                     <span>{{ s.id }}</span>
                     <span class="h-1 w-1 rounded-full bg-gray-300"></span>
