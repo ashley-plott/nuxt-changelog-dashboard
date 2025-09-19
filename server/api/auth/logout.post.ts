@@ -1,5 +1,3 @@
-
-// server/api/auth/logout.post.ts
 import { defineEventHandler } from 'h3'
 import { clearUserSession } from '../../utils/session'
 

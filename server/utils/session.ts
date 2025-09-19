@@ -1,97 +1,80 @@
-
 // server/utils/session.ts
-import { getCookie, setCookie, deleteCookie, H3Event, createError } from 'h3'
+import type { H3Event } from 'h3'
+import { getCookie, setCookie, deleteCookie, createError } from 'h3'
 import crypto from 'node:crypto'
-import { getDb } from './mongo'
 
-const COOKIE_NAME = 'dash_session'
+const COOKIE_NAME = 'plott_sess'
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 30 // 30 days
+const SECRET = process.env.SESSION_SECRET || 'dev-insecure-change-me'
 
-function b64url(input: Buffer | string) {
-  const b = typeof input === 'string' ? Buffer.from(input) : input
-  return b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+export type SessionUser = {
+  id: string
+  email: string
+  name?: string
+  role?: 'admin' | 'manager' | 'user'
 }
 
-function unb64url(s: string) {
-  s = s.replace(/-/g, '+').replace(/_/g, '/')
-  while (s.length % 4) s += '='
-  return Buffer.from(s, 'base64')
+/** base64url helpers */
+function b64u(input: Buffer | string) {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+function unb64u(input: string) {
+  const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4))
+  return Buffer.from(input.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64').toString('utf8')
 }
 
-function sign(data: string, secret: string) {
-  return b64url(crypto.createHmac('sha256', secret).update(data).digest())
+/** Sign and verify a small JSON payload */
+function sign(data: string) {
+  return b64u(crypto.createHmac('sha256', SECRET).update(data).digest())
+}
+function encodeSession(obj: any) {
+  const payload = b64u(JSON.stringify(obj))
+  const sig = sign(payload)
+  return `${payload}.${sig}`
+}
+function decodeSession(token: string | undefined | null): any | null {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null
+  const [payload, sig] = token.split('.')
+  if (sig !== sign(payload)) return null
+  try { return JSON.parse(unb64u(payload)) } catch { return null }
 }
 
-type SessionPayload = {
-  sub: string,     // user id
-  role: 'admin' | 'manager' | 'viewer',
-  iat: number,
-  exp: number,
-  v: 1
-}
-
-export function createSessionToken(payload: SessionPayload, secret: string) {
-  const body = b64url(JSON.stringify(payload))
-  const sig = sign(body, secret)
-  return `${body}.${sig}`
-}
-
-export function verifySessionToken(token: string, secret: string): SessionPayload | null {
-  const [body, sig] = token.split('.', 2)
-  if (!body || !sig) return null
-  const expected = sign(body, secret)
-  if (expected !== sig) return null
-  try {
-    const payload = JSON.parse(unb64url(body).toString()) as SessionPayload
-    if (typeof payload.exp !== 'number' || Date.now() / 1000 > payload.exp) return null
-    return payload
-  } catch {
-    return null
-  }
-}
-
-export async function setUserSession(event: H3Event, userId: string, role: 'admin'|'manager'|'viewer', days = 30) {
-  const secret = process.env.NUXT_HMAC_SECRET || process.env.NUXT_ADMIN_KEY || ''
-  if (!secret) throw createError({ statusCode: 500, statusMessage: 'Server missing signing secret' })
-  const now = Math.floor(Date.now() / 1000)
-  const token = createSessionToken({ sub: userId, role, iat: now, exp: now + days*24*3600, v: 1 }, secret)
+/** Public helpers */
+export async function setUserSession(event: H3Event, user: SessionUser) {
+  const token = encodeSession({ user, ver: 1 })
   setCookie(event, COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
-    maxAge: days * 24 * 3600
+    maxAge: COOKIE_MAX_AGE,
   })
 }
 
-export function clearUserSession(event: H3Event) {
+export async function clearUserSession(event: H3Event) {
   deleteCookie(event, COOKIE_NAME, { path: '/' })
 }
 
-export async function requireUser(event: H3Event) {
-  const secret = process.env.NUXT_HMAC_SECRET || process.env.NUXT_ADMIN_KEY || ''
-  if (!secret) throw createError({ statusCode: 500, statusMessage: 'Server missing signing secret' })
-  const token = getCookie(event, COOKIE_NAME) || ''
-  const payload = verifySessionToken(token, secret)
-  if (!payload) throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
-  const db = await getDb()
-  const user = await db.collection('users').findOne({ _id: new (await import('mongodb')).ObjectId(payload.sub) }, { projection: { password: 0 } })
-  if (!user) throw createError({ statusCode: 401, statusMessage: 'User not found' })
-  return { id: payload.sub, role: payload.role, user }
+export function getSessionUser(event: H3Event): SessionUser | null {
+  const raw = getCookie(event, COOKIE_NAME)
+  const data = decodeSession(raw)
+  return data?.user || null
 }
 
-const roleRank: Record<'viewer'|'manager'|'admin', number> = { viewer: 1, manager: 5, admin: 10 }
+export function isAuthed(event: H3Event): boolean {
+  return !!getSessionUser(event)
+}
 
-export async function requireRole(event: H3Event, allowed: Array<'admin'|'manager'|'viewer'>) {
-  const session = await requireUser(event)
-  const maxNeeded = Math.max(...allowed.map(r => roleRank[r]))
-  if (roleRank[session.role as keyof typeof roleRank] < maxNeeded) {
+export async function requireUser(event: H3Event): Promise<SessionUser> {
+  const u = getSessionUser(event)
+  if (!u) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+  return u
+}
+
+export async function requireRole(event: H3Event, roles: Array<SessionUser['role']>) {
+  const u = await requireUser(event)
+  if (!roles.includes((u.role as any) || 'user')) {
     throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
   }
-  return session
-}
-
-export function isAuthed(event: H3Event) {
-  const secret = process.env.NUXT_HMAC_SECRET || process.env.NUXT_ADMIN_KEY || ''
-  const token = getCookie(event, COOKIE_NAME) || ''
-  return !!(secret && verifySessionToken(token, secret))
+  return u
 }

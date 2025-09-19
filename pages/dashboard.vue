@@ -1,11 +1,29 @@
 <!-- pages/dashboard.vue -->
 <script setup lang="ts">
+definePageMeta({ middleware: 'auth' }) // keep dashboard behind login
+
+type MaintStatus =
+  | 'To-Do'
+  | 'In Progress'
+  | 'Awaiting Form Conf'
+  | 'Chased Via Email'
+  | 'Chased Via Phone'
+  | 'Completed'
+
+interface OverviewMaintItem {
+  site: { id: string; name?: string; env: 'production'|'staging'|'dev'|'test' }
+  date: string
+  kind: 'maintenance'|'report'
+  status?: MaintStatus
+  labels?: { preRenewal?: boolean; midYear?: boolean; reportDue?: boolean }
+}
+
 const { data, pending, error, refresh } = await useFetch('/api/scheduler/overview')
 
-// Tabs
+/** Tabs */
 const tab = ref<'overview'|'months'|'sites'>('overview')
 
-// Filters (Sites tab)
+/** Filters (Sites tab) */
 const q = ref('')
 const sortBy = ref<'az'|'renew-asc'|'renew-desc'>('az')
 const envFilter = ref<'all'|'production'|'staging'|'dev'|'test'>('all')
@@ -17,9 +35,15 @@ function formatRenew(d?: string|number|Date) {
 }
 function monthName(m?: number) { if (!m) return ''; return new Date(2000, (m||1)-1, 1).toLocaleString(undefined, { month: 'long' }) }
 
+/** Server data */
 const sites = computed(() => (data.value?.sites || []) as any[])
 
-// Sites tab filtering/sort
+/** Optional: real maintenance rows (preferred) */
+const maintenance = computed<OverviewMaintItem[]>(
+  () => (data.value?.maintenance || []) as OverviewMaintItem[]
+)
+
+/** Sites tab filtering/sort */
 const filtered = computed(() => {
   const term = q.value.trim().toLowerCase()
   let list = sites.value.filter(s => {
@@ -41,10 +65,12 @@ const filtered = computed(() => {
   return list
 })
 
-// Month-by-month (12 months from now), with reports
+/** Month-by-month (12 months from now) */
 const now = new Date()
 const startMonthIdx = now.getUTCMonth()
 const startYear = now.getUTCFullYear()
+
+/** Fallback helpers when API doesn't include maintenance rows */
 const idx = (m:number) => (Number(m||0)-1+12)%12
 const preIdxOf    = (m:number) => (idx(m)-2+12)%12
 const reportIdxOf = (m:number) => (idx(m)-1+12)%12
@@ -52,31 +78,80 @@ const midIdxOf    = (m:number) => (preIdxOf(m)+6)%12
 
 type MonthOverview = {
   key: string; label: string; year: number; monthIdx: number;
-  renewals: any[]; maintenance: Array<any & { preRenewal?: boolean; midYear?: boolean }>; reports: any[]
+  renewals: any[];
+  maintenance: Array<any & { preRenewal?: boolean; midYear?: boolean; status?: MaintStatus }>;
+  reports: Array<any & { status?: MaintStatus }>;
 }
 
 const monthsOverview = computed<MonthOverview[]>(() => {
   const out: MonthOverview[] = []
-  const list = sites.value
+
   for (let i=0;i<12;i++) {
     const monthIdx = (startMonthIdx + i) % 12
     const year = startYear + Math.floor((startMonthIdx + i) / 12)
     const label = new Date(Date.UTC(year, monthIdx, 1)).toLocaleString(undefined, { month: 'long', year: 'numeric' })
 
-    const renewals = list.filter(s => Number(s.renewMonth) === monthIdx + 1)
-    const maintenance = list
+    /** If server provided real maintenance items, use them (and hide Completed). */
+    if (maintenance.value.length) {
+      const inMonth = maintenance.value.filter(it => {
+        const d = new Date(it.date)
+        return d.getUTCFullYear() === year && d.getUTCMonth() === monthIdx && it.status !== 'Completed'
+      })
+
+      const maintList = inMonth
+        .filter(it => it.kind === 'maintenance')
+        .map(it => ({ ...it.site, ...(it.labels||{}), status: it.status }))
+
+      const reportList = inMonth
+        .filter(it => it.kind === 'report')
+        .map(it => ({ ...it.site, status: it.status }))
+
+      const renewals = (data.value?.sites || []).filter((s: any) => Number(s.renewMonth) === monthIdx + 1)
+
+      out.push({ key: `${year}-${monthIdx}`, label, year, monthIdx, renewals, maintenance: maintList, reports: reportList })
+      continue
+    }
+
+    /** Fallback to static cadence math (no status available here). */
+    const renewals = sites.value.filter(s => Number(s.renewMonth) === monthIdx + 1)
+    const maintenanceFallback = sites.value
       .filter(s => preIdxOf(Number(s.renewMonth)) === monthIdx || midIdxOf(Number(s.renewMonth)) === monthIdx)
       .map(s => ({ ...s,
         preRenewal: preIdxOf(Number(s.renewMonth)) === monthIdx,
         midYear:    midIdxOf(Number(s.renewMonth)) === monthIdx
       }))
-    const reports = list.filter(s => reportIdxOf(Number(s.renewMonth)) === monthIdx)
 
-    out.push({ key: `${year}-${monthIdx}`, label, year, monthIdx, renewals, maintenance, reports })
+    const reportsFallback = sites.value.filter(s => reportIdxOf(Number(s.renewMonth)) === monthIdx)
+
+    out.push({
+      key: `${year}-${monthIdx}`, label, year, monthIdx,
+      renewals,
+      maintenance: maintenanceFallback, // no status info to filter here
+      reports: reportsFallback          // no status info to filter here
+    })
   }
   return out
 })
+
 const thisMonth = computed(() => monthsOverview.value[0])
+
+/** Email summary */
+const sendingMail = ref(false)
+const mailMsg = ref<string|null>(null)
+const mailErr = ref<string|null>(null)
+
+async function sendMonthlySummary() {
+  sendingMail.value = true
+  mailMsg.value = mailErr.value = null
+  try {
+    const res:any = await $fetch('/api/mail/summary', { method: 'POST' })
+    mailMsg.value = `Sent. Reports: ${res?.counts?.reports ?? 0}, Maintenance: ${res?.counts?.maintenance ?? 0}`
+  } catch (e:any) {
+    mailErr.value = e?.data?.message || e?.message || 'Failed to send email'
+  } finally {
+    sendingMail.value = false
+  }
+}
 </script>
 
 <template>
@@ -89,8 +164,13 @@ const thisMonth = computed(() => monthsOverview.value[0])
       </div>
       <div class="flex items-center gap-3">
         <button @click="refresh" class="px-4 py-2 rounded-lg bg-black text-white shadow-sm disabled:opacity-60" :disabled="pending">Refresh</button>
+        <button @click="sendMonthlySummary" class="px-4 py-2 rounded-lg border bg-white shadow-sm disabled:opacity-60" :disabled="sendingMail">
+          {{ sendingMail ? 'Sending…' : 'Email summary' }}
+        </button>
         <NuxtLink to="/sites" class="px-4 py-2 rounded-lg bg-black text-white shadow-sm">Add Site</NuxtLink>
       </div>
+      <p v-if="mailMsg" class="text-xs text-emerald-700">{{ mailMsg }}</p>
+      <p v-if="mailErr" class="text-xs text-red-600">{{ mailErr }}</p>
     </div>
 
     <!-- Tabs -->
@@ -107,14 +187,19 @@ const thisMonth = computed(() => monthsOverview.value[0])
     <template v-else>
       <!-- OVERVIEW -->
       <div v-show="tab==='overview'" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Maintenance this month -->
+        <!-- Maintenance this month (Completed hidden when API provides maintenance rows) -->
         <div class="rounded-2xl border bg-white p-5 shadow-sm">
           <div class="flex items-center justify-between">
             <h2 class="text-base font-semibold">Maintenance this month</h2>
             <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.maintenance.length }}</span>
           </div>
           <div class="mt-3 space-y-2" v-if="thisMonth.maintenance.length">
-            <NuxtLink v-for="s in thisMonth.maintenance" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
+            <NuxtLink
+              v-for="s in thisMonth.maintenance"
+              :key="s.id"
+              :to="`/site/${s.id}`"
+              class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50"
+            >
               <div class="min-w-0">
                 <div class="truncate font-medium">{{ s.name || s.id }}</div>
                 <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
@@ -128,14 +213,19 @@ const thisMonth = computed(() => monthsOverview.value[0])
           <p v-else class="text-sm text-gray-500">No maintenance scheduled this month.</p>
         </div>
 
-        <!-- Reports due this month -->
+        <!-- Reports due this month (Completed hidden when API provides maintenance rows) -->
         <div class="rounded-2xl border bg-white p-5 shadow-sm">
           <div class="flex items-center justify-between">
             <h2 class="text-base font-semibold">Reports due this month</h2>
             <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.reports.length }}</span>
           </div>
           <div class="mt-3 space-y-2" v-if="thisMonth.reports.length">
-            <NuxtLink v-for="s in thisMonth.reports" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
+            <NuxtLink
+              v-for="s in thisMonth.reports"
+              :key="s.id"
+              :to="`/site/${s.id}`"
+              class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50"
+            >
               <div class="min-w-0">
                 <div class="truncate font-medium">{{ s.name || s.id }}</div>
                 <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>

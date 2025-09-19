@@ -1,10 +1,7 @@
-
-// server/api/auth/me.get.ts
 import { defineEventHandler } from 'h3'
-import { isAuthed, requireUser } from '../../utils/session'
+import { getSessionUser } from '../../utils/session'
 
-export default defineEventHandler(async (event) => {
-  if (!isAuthed(event)) return { authenticated: false }
-  const { user, role, id } = await requireUser(event)
-  return { authenticated: true, user: { id, email: user.email, name: user.name, role } }
+export default defineEventHandler((event) => {
+  const user = getSessionUser(event)
+  return { authenticated: !!user, user: user || null }
 })

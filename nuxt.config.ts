@@ -14,5 +14,11 @@ export default defineNuxtConfig({
       title: 'PLOTT Maintenance'
     }
   },
+   runtimeConfig: {
+    POSTMARK_TOKEN: process.env.POSTMARK_TOKEN,
+    POSTMARK_MESSAGE_STREAM: process.env.POSTMARK_MESSAGE_STREAM || 'outbound',
+    MAIL_FROM: process.env.MAIL_FROM,
+    MAIL_TO_DEFAULT: process.env.MAIL_TO_DEFAULT,
+  },
   devtools: { enabled: true }
 })

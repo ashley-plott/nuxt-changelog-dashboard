@@ -1,6 +1,16 @@
 <!-- pages/site/[id].vue -->
 <script setup lang="ts">
+definePageMeta({ middleware: 'auth' }) // protect page (see middleware below)
+
 type TabKey = 'calendar' | 'changelog' | 'forms' | 'notes' | 'details'
+
+type MaintStatus =
+  | 'To-Do'
+  | 'In Progress'
+  | 'Awaiting Form Conf'
+  | 'Chased Via Email'
+  | 'Chased Via Phone'
+  | 'Completed'
 
 interface PrimaryContact { name?: string|null; email?: string|null; phone?: string|null }
 interface SiteDoc {
@@ -12,6 +22,7 @@ interface MaintItem {
   date: string
   kind?: 'maintenance' | 'report'
   labels?: { preRenewal?: boolean; reportDue?: boolean; midYear?: boolean }
+  status?: MaintStatus
 }
 interface ChangelogEntry {
   _id?: string
@@ -52,6 +63,11 @@ function inMonth(it: { dateObj: Date }, m: { start: Date; end: Date }) {
 }
 const toISOOrUndefined = (s:string) => s ? new Date(s).toISOString() : undefined
 
+// --- Auth (and optional hard redirect if not authed on client hydration) ---
+const me = await $fetch<{ authenticated: boolean; user?: any }>('/api/auth/me', { headers }).catch(() => ({ authenticated: false }))
+const authed = !!me?.authenticated
+const my = authed ? me.user : null
+
 // Site & maintenance
 const { data, pending, error, refresh: refreshSite } = await useFetch<{ site: SiteDoc; items: MaintItem[] }>(
   `/api/scheduler/sites/${id}`, { headers, key: `site-${id}` }
@@ -62,12 +78,7 @@ const items = computed(() => (data.value?.items || []).map((it:any) => ({ ...it,
 // Tabs
 const tab = ref<TabKey>('calendar')
 
-// Auth
-const me = await $fetch<{ authenticated: boolean; user?: any }>('/api/auth/me', { headers }).catch(() => ({ authenticated: false }))
-const authed = !!me?.authenticated
-const my = authed ? me.user : null
-
-// ----- DISPLAY HELPERS (Website/Git/contact + renewal visibility) -----
+// ----- DISPLAY HELPERS -----
 const displayWebsiteUrl = computed(() => {
   const s = site.value as any
   return (s?.websiteUrl || s?.url || '') as string
@@ -78,8 +89,41 @@ const displayContact = computed<PrimaryContact | null>(() => site.value?.primary
 function isRenewalMonthUTC(monthStartUTC: Date) {
   const r = Number(site.value?.renewMonth || 0)
   if (!r) return false
-  // months[] are UTC dates; compare UTC month to (renewMonth-1)
   return monthStartUTC.getUTCMonth() === (r - 1)
+}
+
+// ----- Status helpers -----
+const STATUS_LIST: MaintStatus[] = [
+  'To-Do',
+  'In Progress',
+  'Awaiting Form Conf',
+  'Chased Via Email',
+  'Chased Via Phone',
+  'Completed'
+]
+function statusClass(s?: MaintStatus) {
+  switch (s) {
+    case 'In Progress':        return 'bg-sky-50 text-sky-700 border border-sky-100'
+    case 'Awaiting Form Conf': return 'bg-amber-50 text-amber-800 border border-amber-100'
+    case 'Chased Via Email':   return 'bg-violet-50 text-violet-700 border border-violet-100'
+    case 'Chased Via Phone':   return 'bg-purple-50 text-purple-700 border border-purple-100'
+    case 'Completed':          return 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+    default:                   return 'bg-gray-50 text-gray-700 border border-gray-200' // To-Do / fallback
+  }
+}
+async function setItemStatus(ev: MaintItem, next: MaintStatus) {
+  if (!(my?.role === 'admin' || my?.role === 'manager')) return
+  await $fetch('/api/scheduler/maintenance/status', {
+    method: 'PATCH',
+    body: {
+      siteId: ev.site.id,
+      env: ev.site.env,
+      date: ev.date,
+      status: next
+    },
+    headers
+  })
+  await refreshSite()
 }
 
 // Changelog
@@ -176,7 +220,7 @@ async function rebuildMaintenance(){
 // Favicon helpers
 const siteInitial = computed(() => (site.value?.name || site.value?.id || id).slice(0,1).toUpperCase())
 const siteHostname = computed(() => {
-  const raw = displayWebsiteUrl.value // already handles websiteUrl || url
+  const raw = displayWebsiteUrl.value
   try { return raw ? new URL(raw).hostname : '' } catch { return '' }
 })
 const favPrimary  = computed(() => siteHostname.value ? `https://www.google.com/s2/favicons?sz=64&domain=${siteHostname.value}` : '')
@@ -262,9 +306,9 @@ defineExpose({ refreshSite })
         <div v-for="m in months" :key="m.start.toISOString()" class="rounded-2xl border bg-white p-5 shadow-sm">
           <div class="flex items-center justify-between">
             <h3 class="text-base font-semibold">{{ formatMonth(m.start) }}</h3>
-            <!-- Renewal pill for the month matching renewMonth -->
             <span v-if="isRenewalMonthUTC(m.start)" class="rounded-full border px-2 py-0.5 text-xs bg-emerald-50 text-emerald-700">Renewal</span>
           </div>
+
           <div class="mt-4 space-y-2">
             <div
               v-for="ev in items.filter(it => inMonth(it, m))"
@@ -277,12 +321,31 @@ defineExpose({ refreshSite })
                   {{ ev.kind === 'report' || ev.labels?.reportDue ? 'Report due' : 'Maintenance' }}
                 </div>
               </div>
-              <div class="flex gap-2">
+
+              <div class="flex items-center gap-2">
+                <!-- Status badge -->
+                <span :class="['px-2 py-0.5 rounded-full text-xs', statusClass(ev.status)]">
+                  {{ ev.status || 'To-Do' }}
+                </span>
+
+                <!-- Labels -->
                 <span v-if="ev.labels?.reportDue"  class="px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-100">Report</span>
                 <span v-if="ev.labels?.preRenewal" class="px-2 py-0.5 rounded-full text-xs bg-amber-50  text-amber-800  border border-amber-100">Pre-renewal</span>
                 <span v-if="ev.labels?.midYear"    class="px-2 py-0.5 rounded-full text-xs bg-blue-50   text-blue-800   border border-blue-100">Mid-year</span>
+
+                <!-- Inline status editor (managers/admins only) -->
+                <select
+                  v-if="canManageSite"
+                  :value="ev.status || 'To-Do'"
+                  @change="setItemStatus(ev, ($event.target as HTMLSelectElement).value as MaintStatus)"
+                  class="ml-2 rounded-md border px-2 py-1 text-xs"
+                  title="Update status"
+                >
+                  <option v-for="s in STATUS_LIST" :key="s" :value="s">{{ s }}</option>
+                </select>
               </div>
             </div>
+
             <div v-if="!items.some(it => inMonth(it, m))" class="rounded-xl border border-dashed px-3 py-6 text-center text-sm text-gray-500">
               No maintenance scheduled.
             </div>
@@ -295,6 +358,7 @@ defineExpose({ refreshSite })
     <div v-show="tab==='changelog'" class="space-y-3">
       <h2 class="text-lg font-semibold">Changelog</h2>
       <div class="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+        <!-- filters -->
         <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
           <div class="md:col-span-1">
             <label class="block text-xs font-medium text-gray-600 mb-1">Environment</label>
@@ -591,12 +655,13 @@ defineExpose({ refreshSite })
               @click="rebuildMaintenance"
               :disabled="rebuilding"
               class="ml-auto rounded-lg bg-rose-600 px-4 py-2 text-white hover:bg-rose-700 disabled:opacity-50"
-              title="Deletes and regenerates Pre (R−2), Report (R−1), Mid (+6) entries">
+              title="Deletes and regenerates cadence + report entries"
+            >
               {{ rebuilding ? 'Rebuilding…' : 'Rebuild maintenance' }}
             </button>
           </div>
           <p class="mt-2 text-xs text-gray-600">
-            Rebuild deletes existing entries for this site/env and recreates: Pre-renewal (R−2), Report due (R−1), and Mid-year (pre+6) across the selected window.
+            Rebuild deletes existing entries for this site/env and recreates: 2-month cadence anchored at Pre-renewal (R−2), Report (R−1), and marks Mid-year (pre+6).
           </p>
           <p v-if="rbMsg" class="mt-2 text-sm text-emerald-700">{{ rbMsg }}</p>
           <p v-if="rbErr" class="mt-2 text-sm text-red-600">{{ rbErr }}</p>

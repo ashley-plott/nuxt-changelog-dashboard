@@ -4,11 +4,20 @@ import { getDb } from '../../utils/mongo'
 import { addMonths, firstOfMonthUTC, toISODate } from '../../utils/date'
 import { requireRole } from '../../utils/session'
 
+type MaintStatus =
+  | 'To-Do'
+  | 'In Progress'
+  | 'Awaiting Form Conf'
+  | 'Chased Via Email'
+  | 'Chased Via Phone'
+  | 'Completed'
+
 function coerceRenewMonth(m?: any): number {
   const n = Number(m)
   if (!n || n < 1 || n > 12) return (new Date()).getUTCMonth() + 1
   return n
 }
+
 function normalizeUrl(u?: string): string {
   const s = (u || '').trim()
   if (!s) return ''
@@ -16,11 +25,14 @@ function normalizeUrl(u?: string): string {
   catch { return s }
 }
 
-// Cadence:
-//   Renewal month R (1..12) -> index r = R-1 (0..11)
-//   Pre-renewal   = r-2 (R-2)  ← cadence anchor (every 2 months)
-//   Reports due   = r-1 (R-1)  ← single month per year, not on cadence
-//   Mid-year      = (pre + 6) % 12
+/**
+ * Cadence:
+ *   Renewal month R (1..12) -> r = R-1 (0..11)
+ *   Pre-renewal (anchor) = r-2
+ *   Minor maint. every 2 months from pre-renewal: pre, pre+2, pre+4, pre+6(mid), pre+8, pre+10
+ *   Reports due = r-1 (one month after pre-renewal)
+ *   Mid-year    = pre + 6
+ */
 export default defineEventHandler(async (event) => {
   await requireRole(event, ['manager', 'admin'])
 
@@ -32,7 +44,7 @@ export default defineEventHandler(async (event) => {
   const env        = (body?.env || 'production').trim()
   const renewMonth = coerceRenewMonth(body?.renewMonth)
 
-  // Optionals
+  // Optionals (normalized)
   const websiteUrl = normalizeUrl(typeof body?.websiteUrl === 'string' ? body.websiteUrl : '')
   const gitUrl     = normalizeUrl(typeof body?.gitUrl === 'string' ? body.gitUrl : '')
   const primaryContact = body?.primaryContact && typeof body.primaryContact === 'object'
@@ -43,7 +55,7 @@ export default defineEventHandler(async (event) => {
       }
     : null
 
-  // Window & rebuild options
+  // Window & rebuild
   const rebuild        = !!body?.rebuild
   const backfillMonths = Math.max(0, Math.min(60, Number(body?.backfillMonths ?? 12)))
   const forwardMonths  = Math.max(0, Math.min(60, Number(body?.forwardMonths  ?? 14)))
@@ -51,7 +63,7 @@ export default defineEventHandler(async (event) => {
   const db  = await getDb()
   const now = new Date()
 
-  // Upsert site (clear empty fields with $unset)
+  // Upsert site + clear explicitly empty optionals
   const siteSet: any = { id, name, env, renewMonth, updatedAt: now }
   const siteUnset: any = {}
 
@@ -73,7 +85,7 @@ export default defineEventHandler(async (event) => {
   if (Object.keys(siteUnset).length) update.$unset = siteUnset
   await db.collection('sites').updateOne({ id }, update, { upsert: true })
 
-  // Rebuild = wipe all existing items for this site/env
+  // Rebuild = wipe existing items for this site/env
   if (rebuild) {
     await db.collection('maintenance').deleteMany({ 'site.id': id, 'site.env': env })
   }
@@ -90,11 +102,35 @@ export default defineEventHandler(async (event) => {
   const reportIdx = (rIdx - 1 + 12) % 12
   const midIdx    = (preIdx + 6) % 12
 
+  // Helpers
   const planned: Array<{ date: string, kind: 'maintenance'|'report', labels: any }> = []
   const ops: Promise<any>[] = []
 
+  const upsertItem = (d: Date, kind: 'maintenance'|'report', labels: any) => {
+    const dateISO = toISODate(d)
+    const ev = {
+      site: { id, name, env },
+      date: dateISO,
+      labels,
+      kind,
+      status: 'To-Do' as MaintStatus,   // default
+      createdAt: now,
+      updatedAt: now,
+      statusHistory: [{ at: now, status: 'To-Do' as MaintStatus }]
+    }
+    planned.push({ date: dateISO, kind, labels })
+    ops.push(
+      db.collection('maintenance').updateOne(
+        { 'site.id': id, 'site.env': env, date: dateISO },
+        // If not rebuilding, don't overwrite existing docs (keeps any custom status)
+        rebuild ? { $set: ev } : { $setOnInsert: ev },
+        { upsert: true }
+      )
+    )
+  }
+
   // ----- 1) Two-month cadence anchored to preIdx (all 'maintenance') -----
-  // Find first cadence date <= windowStart at month preIdx
+  // Start from the first occurrence of preIdx on/before windowStart, then step by 2 months
   let cadence = firstOfMonthUTC(windowStart.getUTCFullYear(), preIdx)
   if (cadence > windowStart) cadence = firstOfMonthUTC(windowStart.getUTCFullYear() - 1, preIdx)
 
@@ -103,28 +139,13 @@ export default defineEventHandler(async (event) => {
     const m = d.getUTCMonth()
     const labels = {
       preRenewal: m === preIdx,
-      reportDue:  false,             // not on cadence
+      reportDue:  false,             // reports handled separately
       midYear:    m === midIdx
     }
-    const ev = {
-      site: { id, name, env },
-      date: toISODate(d),
-      labels,
-      kind: 'maintenance' as const,
-      createdAt: now
-    }
-    planned.push({ date: ev.date, kind: ev.kind, labels })
-    ops.push(
-      db.collection('maintenance').updateOne(
-        { 'site.id': id, 'site.env': env, date: ev.date },
-        rebuild ? { $set: ev } : { $setOnInsert: ev },
-        { upsert: true }
-      )
-    )
+    upsertItem(d, 'maintenance', labels)
   }
 
   // ----- 2) Report months (R−1) as standalone 'report' items -----
-  // Walk month-by-month only to hit reportIdx once per year within the window
   for (let d = firstOfMonthUTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth()); d < stop; d = addMonths(d, 1)) {
     if (d.getUTCMonth() !== reportIdx) continue
     const m = d.getUTCMonth()
@@ -133,21 +154,7 @@ export default defineEventHandler(async (event) => {
       reportDue:  true,
       midYear:    m === midIdx
     }
-    const ev = {
-      site: { id, name, env },
-      date: toISODate(d),
-      labels,
-      kind: 'report' as const,
-      createdAt: now
-    }
-    planned.push({ date: ev.date, kind: ev.kind, labels })
-    ops.push(
-      db.collection('maintenance').updateOne(
-        { 'site.id': id, 'site.env': env, date: ev.date },
-        rebuild ? { $set: ev } : { $setOnInsert: ev },
-        { upsert: true }
-      )
-    )
+    upsertItem(d, 'report', labels)
   }
 
   await Promise.all(ops)
