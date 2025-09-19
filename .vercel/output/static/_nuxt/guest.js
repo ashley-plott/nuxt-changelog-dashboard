@@ -1,1 +1,0 @@
-import{ac as t,ad as s,n as c}from"./entry.js";const r=t(async()=>{let e,a;if(([e,a]=s(()=>$fetch("/api/auth/me",{headers:void 0}).catch(()=>({authenticated:!1}))),e=await e,a(),e)?.authenticated)return c("/dashboard")});export{r as default};
