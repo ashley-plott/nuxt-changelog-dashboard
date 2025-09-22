@@ -49,6 +49,10 @@ const route = useRoute()
 const id = route.params.id as string
 const headers = process.server ? useRequestHeaders(['cookie']) : undefined
 
+const deleting = ref(false)
+const delErr = ref<string|null>(null)
+const delMsg = ref<string|null>(null)
+
 function firstOfMonthUTC(d = new Date()) { return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)) }
 function formatMonth(d: Date) { return d.toLocaleString(undefined, { month: 'long', year: 'numeric' }) }
 const start = firstOfMonthUTC(new Date())
@@ -227,6 +231,28 @@ const favPrimary  = computed(() => siteHostname.value ? `https://www.google.com/
 const favFallback = computed(() => siteHostname.value ? `https://icons.duckduckgo.com/ip3/${siteHostname.value}.ico` : '')
 const favTriedFallback = ref(false); const favHide = ref(false)
 function onFavError(){ if(!favTriedFallback.value) favTriedFallback.value = true; else favHide.value = true }
+
+async function deleteSite() {
+  if (!canManageSite.value) return
+  if (!site.value) return
+  const name = site.value.name || site.value.id || id
+  if (!confirm(`Delete site "${name}" and all its maintenance?\nThis cannot be undone.`)) return
+
+  deleting.value = true
+  delErr.value = delMsg.value = null
+  try {
+    const res:any = await $fetch(`/api/scheduler/sites/${encodeURIComponent(id)}?cascade=true`, {
+      method: 'DELETE'
+    })
+    delMsg.value = `Deleted. (maintenance removed: ${res?.deleted?.maintenance ?? 0})`
+    // bounce back to dashboard
+    router.push('/dashboard')
+  } catch (e:any) {
+    delErr.value = e?.data?.message || e?.message || 'Failed to delete site'
+  } finally {
+    deleting.value = false
+  }
+}
 
 defineExpose({ refreshSite })
 </script>
@@ -634,10 +660,24 @@ defineExpose({ refreshSite })
           <button v-if="canManageSite" @click="saveDetails" :disabled="detSaving" class="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50">
             {{ detSaving ? 'Saving…' : 'Save details' }}
           </button>
+
+          <button
+            v-if="canManageSite"
+            @click="deleteSite"
+            :disabled="deleting"
+            class="rounded-lg bg-rose-600 px-4 py-2 text-white hover:bg-rose-700 disabled:opacity-50"
+            title="Permanently delete this site and its maintenance"
+          >
+            {{ deleting ? 'Deleting…' : 'Delete site' }}
+          </button>
+
           <p v-if="detMsg" class="text-sm text-emerald-700">{{ detMsg }}</p>
           <p v-if="detErr" class="text-sm text-red-600">{{ detErr }}</p>
+          <p v-if="delMsg" class="text-sm text-emerald-700">{{ delMsg }}</p>
+          <p v-if="delErr" class="text-sm text-red-600">{{ delErr }}</p>
           <p v-if="!canManageSite" class="text-sm text-gray-500">Sign in as a manager or admin to edit.</p>
         </div>
+
 
         <!-- Rebuild CTA -->
         <div class="rounded-xl border bg-gray-50 p-4">

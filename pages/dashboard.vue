@@ -152,6 +152,48 @@ async function sendMonthlySummary() {
     sendingMail.value = false
   }
 }
+
+// in <script setup>
+type PingRes = {
+  ok: boolean
+  finalUrl?: string
+  status?: number
+  statusText?: string
+  timeMs?: number
+  hasMaintainClass?: boolean
+  error?: string
+}
+
+const testUrl = ref('')
+const testing = ref(false)
+const testMsg = ref<string|null>(null)
+const testErr = ref<string|null>(null)
+const testRes = ref<PingRes|null>(null)
+
+async function testPing () {
+  testing.value = true
+  testMsg.value = testErr.value = null
+  testRes.value = null
+  try {
+    const res = await $fetch<PingRes>('/api/utils/ping', {
+      method: 'POST',
+      body: { url: testUrl.value, className: 'plott-maintain' } // className optional; defaults in util
+    })
+    testRes.value = res
+    if (!res.ok) {
+      testErr.value = res.error || res.statusText || 'Request failed'
+    } else {
+      testMsg.value = res.hasMaintainClass
+        ? '✅ <header> contains .plott-maintain'
+        : '⚠️ <header> does NOT contain .plott-maintain'
+    }
+  } catch (e:any) {
+    testErr.value = e?.data?.message || e?.message || 'Failed'
+  } finally {
+    testing.value = false
+  }
+}
+
 </script>
 
 <template>
@@ -401,6 +443,31 @@ async function sendMonthlySummary() {
           </NuxtLink>
         </div>
       </div>
+      <!-- Ping Test -->
+      <div class="rounded-2xl border bg-white p-4 shadow-sm">
+        <div class="flex items-center gap-2">
+          <input
+            v-model="testUrl"
+            type="url"
+            placeholder="https://example.com"
+            class="flex-1 border rounded-lg px-3 py-2"
+            autocomplete="off"
+          />
+          <button @click="testPing" class="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-60" :disabled="testing || !testUrl">
+            {{ testing ? 'Pinging…' : 'Test ping' }}
+          </button>
+        </div>
+        <div class="mt-2 text-sm">
+          <p v-if="testMsg" class="text-emerald-700">{{ testMsg }}</p>
+          <p v-if="testErr" class="text-red-600">{{ testErr }}</p>
+          <div v-if="testRes" class="text-xs text-gray-600 mt-1">
+            <div>Final URL: <code>{{ testRes.finalUrl || '—' }}</code></div>
+            <div>Status: <code>{{ testRes.status || '—' }}</code> {{ testRes.statusText || '' }}</div>
+            <div>Time: <code>{{ testRes.timeMs }}ms</code></div>
+          </div>
+        </div>
+      </div>
+
     </template>
   </div>
 </template>
