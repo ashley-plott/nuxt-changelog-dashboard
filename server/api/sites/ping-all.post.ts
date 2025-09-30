@@ -1,88 +1,114 @@
-// server/api/sites/ping-all.post.ts
-import { defineEventHandler, readBody } from 'h3'
-import { getDb } from '../../utils/mongo'
-import { requireRole } from '../../utils/session'
-import { pingUrl } from '../../utils/ping'  // uses the ping util we added earlier
+// server/api/utils/ping.post.ts
+import { defineEventHandler, readBody, createError } from 'h3'
+import { requireUser } from '../../utils/session'
 
-export const runtime = 'nodejs' // keep this on Node runtime
-export const maxBodySize = '1mb'
+function normalizeUrl(u?: string) {
+  const s = (u || '').trim()
+  if (!s) throw createError({ statusCode: 400, statusMessage: 'URL is required' })
+  try {
+    return new URL(s.startsWith('http') ? s : `https://${s}`).toString()
+  } catch {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid URL' })
+  }
+}
 
-type Body = {
-  concurrency?: number      // how many pings at once
-  delayMs?: number          // delay between pings per worker
-  staleMinutes?: number     // only ping if lastPingAt older than this
-  limit?: number            // cap total processed in one call
+// Grab only the <header>…</header> fragment (case-insensitive)
+function extractHeader(html: string): string | null {
+  const m = html.match(/<header\b[^>]*>[\s\S]*?<\/header>/i)
+  return m ? m[0] : null
+}
+
+// True if any class="…" attribute within the fragment contains the token
+function hasClassToken(fragment: string, className: string): boolean {
+  const classAttrRE = /class\s*=\s*(['"])(.*?)\1/gi
+  let m: RegExpExecArray | null
+  while ((m = classAttrRE.exec(fragment))) {
+    const tokens = m[2].split(/\s+/).filter(Boolean)
+    if (tokens.includes(className)) return true
+  }
+  return false
 }
 
 export default defineEventHandler(async (event) => {
-  await requireRole(event, ['manager', 'admin'])
+  // Keep behind auth; change to requireRole(event, ['manager','admin']) if you prefer
+  await requireUser(event)
 
-  const body = (await readBody<Body>(event)) || {}
-  const concurrency = Math.max(1, Math.min(16, Number(body.concurrency ?? 4)))
-  const delayMs     = Math.max(0,  Number(body.delayMs ?? 300))
-  const staleMin    = Math.max(0,  Number(body.staleMinutes ?? 60))
-  const limit       = Math.max(0,  Number(body.limit ?? 0))
+  const body = await readBody<{ url?: string; className?: string; timeoutMs?: number }>(event)
+  const url = normalizeUrl(body?.url)
+  const className = (body?.className || 'plott-maintain').trim()
+  const timeoutMs = Math.max(1000, Math.min(20000, Number(body?.timeoutMs ?? 8000)))
 
-  const db = await getDb()
-  const cutoff = new Date(Date.now() - staleMin * 60_000)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const started = Date.now()
 
-  // Pull stale (or never pinged) sites
-  const query = staleMin
-    ? { $or: [{ lastPingAt: { $lt: cutoff } }, { lastPingAt: { $exists: false } }] }
-    : {}
+  try {
+    const res = await fetch(url, {
+      method: 'GET',                       // need body to inspect <header>
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'PlottHub/1.0 (+dashboard ping)',
+      },
+    })
 
-  const cursor = db.collection('sites')
-    .find(query)
-    .sort({ id: 1 })
+    const timeMs = Date.now() - started
+    clearTimeout(timer)
 
-  const sites = limit ? await cursor.limit(limit).toArray() : await cursor.toArray()
+    let hasMaintainClass: boolean | undefined
+    let statusText = res.statusText
 
-  // Simple in-process queue with N workers
-  const queue = sites.slice()
-  let ok = 0, fail = 0, processed = 0
+    // Only attempt to read text for HTML-like responses
+    const ct = res.headers.get('content-type') || ''
+    if (ct.includes('text/html') || ct.includes('application/xhtml+xml') || ct.includes('xml') || ct === '') {
+      // Read at most ~512KB to avoid huge pages
+      let html = ''
+      try {
+        // Prefer streaming if available to cut early when header closes
+        if (res.body && 'getReader' in res.body) {
+          const reader = (res.body as ReadableStream<Uint8Array>).getReader()
+          const decoder = new TextDecoder('utf-8', { fatal: false })
+          const maxBytes = 512 * 1024
+          let received = 0
+          let headerClosed = false
 
-  async function sleep(ms: number) {
-    if (ms > 0) await new Promise(r => setTimeout(r, ms))
-  }
-
-  async function worker() {
-    while (queue.length) {
-      const s: any = queue.shift()
-      if (!s) break
-
-      const url = s.websiteUrl || s.url
-      if (!url) {
-        await db.collection('sites').updateOne(
-          { id: s.id },
-          { $set: { lastPingAt: new Date(), lastPing: { ok: false, error: 'No URL' } } }
-        )
-        fail++; processed++
-        await sleep(delayMs)
-        continue
-      }
-
-      const result = await pingUrl(url, { timeoutMs: 8000 }) // HEAD→GET fallback
-      if (result.ok) ok++; else fail++; processed++
-
-      await db.collection('sites').updateOne(
-        { id: s.id },
-        {
-          $set: {
-            lastPingAt: new Date(),
-            lastPing: { url, ...result }
+          while (!headerClosed) {
+            const { value, done } = await reader.read()
+            if (done) break
+            received += value?.length || 0
+            html += decoder.decode(value, { stream: true })
+            headerClosed = /<\/header>/i.test(html)
+            if (received >= maxBytes) break
           }
+          html += decoder.decode()
+        } else {
+          html = await res.text()
+          if (html.length > 512 * 1024) html = html.slice(0, 512 * 1024)
         }
-      )
+      } catch { /* ignore body read errors */ }
 
-      await sleep(delayMs)
+      if (html) {
+        const headerFrag = extractHeader(html)
+        hasMaintainClass = headerFrag ? hasClassToken(headerFrag, className) : false
+      }
     }
-  }
 
-  await Promise.all(Array.from({ length: concurrency }, () => worker()))
-
-  return {
-    ok: true,
-    counts: { total: sites.length, processed, ok, fail },
-    settings: { concurrency, delayMs, staleMinutes: staleMin, limit: limit || null }
+    return {
+      ok: res.ok,
+      finalUrl: res.url,
+      status: res.status,
+      statusText,
+      timeMs,
+      hasMaintainClass,
+    }
+  } catch (err: any) {
+    const timeMs = Date.now() - started
+    clearTimeout(timer)
+    return {
+      ok: false,
+      error: err?.name === 'AbortError' ? `Timeout after ${timeoutMs}ms` : (err?.message || String(err)),
+      timeMs,
+    }
   }
 })

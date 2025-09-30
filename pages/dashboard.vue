@@ -2,6 +2,8 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' }) // keep dashboard behind login
 
+// ===== Types =====
+
 type MaintStatus =
   | 'To-Do'
   | 'In Progress'
@@ -18,15 +20,21 @@ interface OverviewMaintItem {
   labels?: { preRenewal?: boolean; midYear?: boolean; reportDue?: boolean }
 }
 
+// ===== Data fetch =====
+
 const { data, pending, error, refresh } = await useFetch('/api/scheduler/overview')
 
-/** Tabs */
+// ===== Tabs =====
+
 const tab = ref<'overview'|'months'|'sites'>('overview')
 
-/** Filters (Sites tab) */
+// ===== Filters (Sites tab) =====
+
 const q = ref('')
 const sortBy = ref<'az'|'renew-asc'|'renew-desc'>('az')
 const envFilter = ref<'all'|'production'|'staging'|'dev'|'test'>('all')
+
+// ===== Formatting helpers =====
 
 function ordinal(n: number) { const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]) }
 function formatRenew(d?: string|number|Date) {
@@ -35,15 +43,48 @@ function formatRenew(d?: string|number|Date) {
 }
 function monthName(m?: number) { if (!m) return ''; return new Date(2000, (m||1)-1, 1).toLocaleString(undefined, { month: 'long' }) }
 
-/** Server data */
-const sites = computed(() => (data.value?.sites || []) as any[])
+// ===== Server data =====
 
-/** Optional: real maintenance rows (preferred) */
+const sites = computed(() => (data.value?.sites || []) as any[])
 const maintenance = computed<OverviewMaintItem[]>(
   () => (data.value?.maintenance || []) as OverviewMaintItem[]
 )
 
-/** Sites tab filtering/sort */
+// ===== Favicons (per-site) =====
+
+const favState = reactive<Record<string, { triedFallback: boolean; hide: boolean }>>({})
+
+function hostOf(s: any) {
+  const raw = s?.websiteUrl || s?.domain || ''
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`)
+    return u.hostname
+  } catch {
+    return ''
+  }
+}
+
+function favPrimary(host: string) {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
+}
+
+function favFallback(host: string) {
+  return `https://icons.duckduckgo.com/ip3/${host}.ico`
+}
+
+function onFavError(e: Event, id: string, host: string) {
+  const img = e.target as HTMLImageElement
+  const st = (favState[id] ||= { triedFallback: false, hide: false })
+  if (!st.triedFallback && host) {
+    st.triedFallback = true
+    img.src = favFallback(host)
+  } else {
+    st.hide = true
+  }
+}
+
+// ===== Filtering & Sorting (Sites tab) =====
+
 const filtered = computed(() => {
   const term = q.value.trim().toLowerCase()
   let list = sites.value.filter(s => {
@@ -65,12 +106,13 @@ const filtered = computed(() => {
   return list
 })
 
-/** Month-by-month (12 months from now) */
+// ===== Months overview (12 months from now) =====
+
 const now = new Date()
 const startMonthIdx = now.getUTCMonth()
 const startYear = now.getUTCFullYear()
 
-/** Fallback helpers when API doesn't include maintenance rows */
+// Fallback helpers when API doesn't include maintenance rows
 const idx = (m:number) => (Number(m||0)-1+12)%12
 const preIdxOf    = (m:number) => (idx(m)-2+12)%12
 const reportIdxOf = (m:number) => (idx(m)-1+12)%12
@@ -91,7 +133,7 @@ const monthsOverview = computed<MonthOverview[]>(() => {
     const year = startYear + Math.floor((startMonthIdx + i) / 12)
     const label = new Date(Date.UTC(year, monthIdx, 1)).toLocaleString(undefined, { month: 'long', year: 'numeric' })
 
-    /** If server provided real maintenance items, use them (and hide Completed). */
+    // If server provided real maintenance items, use them (and hide Completed)
     if (maintenance.value.length) {
       const inMonth = maintenance.value.filter(it => {
         const d = new Date(it.date)
@@ -112,7 +154,7 @@ const monthsOverview = computed<MonthOverview[]>(() => {
       continue
     }
 
-    /** Fallback to static cadence math (no status available here). */
+    // Fallback to static cadence math (no status available)
     const renewals = sites.value.filter(s => Number(s.renewMonth) === monthIdx + 1)
     const maintenanceFallback = sites.value
       .filter(s => preIdxOf(Number(s.renewMonth)) === monthIdx || midIdxOf(Number(s.renewMonth)) === monthIdx)
@@ -126,8 +168,8 @@ const monthsOverview = computed<MonthOverview[]>(() => {
     out.push({
       key: `${year}-${monthIdx}`, label, year, monthIdx,
       renewals,
-      maintenance: maintenanceFallback, // no status info to filter here
-      reports: reportsFallback          // no status info to filter here
+      maintenance: maintenanceFallback,
+      reports: reportsFallback
     })
   }
   return out
@@ -135,7 +177,8 @@ const monthsOverview = computed<MonthOverview[]>(() => {
 
 const thisMonth = computed(() => monthsOverview.value[0])
 
-/** Email summary */
+// ===== Email summary =====
+
 const sendingMail = ref(false)
 const mailMsg = ref<string|null>(null)
 const mailErr = ref<string|null>(null)
@@ -153,7 +196,8 @@ async function sendMonthlySummary() {
   }
 }
 
-// in <script setup>
+// ===== Ping Test =====
+
 type PingRes = {
   ok: boolean
   finalUrl?: string
@@ -175,9 +219,9 @@ async function testPing () {
   testMsg.value = testErr.value = null
   testRes.value = null
   try {
-    const res = await $fetch<PingRes>('/api/utils/ping', {
+    const res = await $fetch('/api/utils/ping', {
       method: 'POST',
-      body: { url: testUrl.value, className: 'plott-maintain' } // className optional; defaults in util
+      body: { url: testUrl.value, className: 'plott-maintain' }
     })
     testRes.value = res
     if (!res.ok) {
@@ -193,6 +237,17 @@ async function testPing () {
     testing.value = false
   }
 }
+
+// ===== Expose helpers to template =====
+
+// (Nuxt auto-exposes in <script setup>, but keeping explicit export comments)
+// - hostOf(s)
+// - favState
+// - favPrimary(host)
+// - favFallback(host)
+// - onFavError(e, id, host)
+// - formatRenew, monthName
+// - filtered, monthsOverview, thisMonth
 
 </script>
 
@@ -392,9 +447,21 @@ async function testPing () {
           >
             <div class="flex items-start justify-between gap-3">
               <div class="flex items-center gap-3">
-                <div class="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center border">
-                  <span class="text-sm font-semibold text-gray-600">{{ (s.name || s.id || '?').slice(0,1).toUpperCase() }}</span>
+                <div class="h-10 w-10 rounded-xl border bg-gray-50 flex items-center justify-center overflow-hidden">
+                  <img
+                    v-if="hostOf(s) && !favState[s.id]?.hide"
+                    :src="favState[s.id]?.triedFallback ? favFallback(hostOf(s)) : favPrimary(hostOf(s))"
+                    @error="(e) => onFavError(e, s.id, hostOf(s))"
+                    :alt="s.name || s.id || 'Site'"
+                    class="h-6 w-6"
+                    decoding="async"
+                    loading="eager"
+                  />
+                  <span v-else class="text-sm font-semibold text-gray-600">
+                    {{ (s.name || s.id || '?').slice(0,1).toUpperCase() }}
+                  </span>
                 </div>
+
                 <div>
                   <h3 class="text-base font-semibold leading-tight">{{ s.name || s.id }}</h3>
                   <div class="flex items-center gap-2 text-[11px] text-gray-500 truncate mt-0.5">

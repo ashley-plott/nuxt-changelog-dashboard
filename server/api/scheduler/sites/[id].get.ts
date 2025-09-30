@@ -1,6 +1,4 @@
 // server/api/scheduler/sites/[id].get.ts
-import { defineEventHandler, getQuery, createError } from 'h3'
-import { getDb } from '../../../utils/mongo'
 
 export default defineEventHandler(async (event) => {
   const id = event.context.params?.id as string
@@ -18,7 +16,16 @@ export default defineEventHandler(async (event) => {
     .toArray()
 
   return {
-    site: { id: site.id, name: site.name, env: site.env, renewMonth: site.renewMonth },
+    site: {
+      id: site.id,
+      name: site.name,
+      env: env || site.env,
+      renewMonth: site.renewMonth,
+      // ✨ include these:
+      websiteUrl: site.websiteUrl || null,
+      gitUrl: site.gitUrl || null,
+      primaryContact: site.primaryContact || null,
+    },
     items
   }
 })

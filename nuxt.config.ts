@@ -4,7 +4,10 @@ import { title } from "process";
 export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   nitro: {
-    preset: 'vercel'
+    preset: 'vercel',
+    externals: {
+      inline:['puppeteer-core', '@sparticuz/chromium'],
+    }
   },
   routeRules: {
     '/api/**': { runtime: 'nodejs' }
