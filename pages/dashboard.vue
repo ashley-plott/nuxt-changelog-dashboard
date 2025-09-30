@@ -1,6 +1,7 @@
-<!-- pages/dashboard.vue -->
+<!-- pages/dashboard.vue (polished layout) -->
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth' }) // keep dashboard behind login
+// Keep dashboard behind login
+definePageMeta({ middleware: 'auth' })
 
 // ===== Types =====
 
@@ -238,122 +239,194 @@ async function testPing () {
   }
 }
 
-// ===== Expose helpers to template =====
+// ===== Status styling helpers =====
 
-// (Nuxt auto-exposes in <script setup>, but keeping explicit export comments)
-// - hostOf(s)
-// - favState
-// - favPrimary(host)
-// - favFallback(host)
-// - onFavError(e, id, host)
+const statusClass = (s?: MaintStatus) => {
+  const base = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px]'
+  switch (s) {
+    case 'To-Do': return base + ' bg-amber-50 text-amber-800 border-amber-200'
+    case 'In Progress': return base + ' bg-blue-50 text-blue-800 border-blue-200'
+    case 'Awaiting Form Conf': return base + ' bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200'
+    case 'Chased Via Email': return base + ' bg-emerald-50 text-emerald-800 border-emerald-200'
+    case 'Chased Via Phone': return base + ' bg-cyan-50 text-cyan-800 border-cyan-200'
+    case 'Completed': return base + ' bg-gray-100 text-gray-700 border-gray-200 line-through'
+    default: return base + ' bg-gray-50 text-gray-700 border-gray-200'
+  }
+}
+
+const envBadge = (env?: string) => {
+  const base = 'px-1.5 py-0.5 rounded border text-[10px] capitalize'
+  switch (env) {
+    case 'production': return base + ' bg-emerald-50 text-emerald-800 border-emerald-200'
+    case 'staging': return base + ' bg-amber-50 text-amber-800 border-amber-200'
+    case 'dev': return base + ' bg-blue-50 text-blue-800 border-blue-200'
+    case 'test': return base + ' bg-gray-50 text-gray-700 border-gray-200'
+    default: return base + ' bg-gray-50 text-gray-700 border-gray-200'
+  }
+}
+
+// ===== Expose helpers to template =====
+// - hostOf(s), favState, favPrimary(host), favFallback(host), onFavError(e, id, host)
 // - formatRenew, monthName
 // - filtered, monthsOverview, thisMonth
-
+// - statusClass, envBadge
+// - sendMonthlySummary, refresh
 </script>
 
 <template>
   <div class="p-6 space-y-6">
-    <!-- Top bar -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold">Sites</h1>
-        <p class="text-sm text-gray-500 mt-1">Search and browse environments</p>
+    <!-- Sticky top bar -->
+    <div class="sticky top-0 z-10 bg-gradient-to-b from-white/90 to-white/50 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b">
+      <div class="max-w-7xl mx-auto px-1 py-3 flex items-center justify-between">
+        <div>
+          <h1 class="text-xl md:text-2xl font-bold tracking-tight">Sites</h1>
+          <p class="text-xs md:text-sm text-gray-500">Search, plan, and track maintenance</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button @click="refresh" class="px-3 md:px-4 py-2 rounded-lg bg-black text-white shadow-sm disabled:opacity-60" :disabled="pending">
+            <span v-if="pending">Refreshing…</span><span v-else>Refresh</span>
+          </button>
+          <button @click="sendMonthlySummary" class="px-3 md:px-4 py-2 rounded-lg border bg-white shadow-sm disabled:opacity-60" :disabled="sendingMail">
+            {{ sendingMail ? 'Sending…' : 'Email summary' }}
+          </button>
+          <NuxtLink to="/sites" class="px-3 md:px-4 py-2 rounded-lg bg-black text-white shadow-sm">Add Site</NuxtLink>
+        </div>
       </div>
-      <div class="flex items-center gap-3">
-        <button @click="refresh" class="px-4 py-2 rounded-lg bg-black text-white shadow-sm disabled:opacity-60" :disabled="pending">Refresh</button>
-        <button @click="sendMonthlySummary" class="px-4 py-2 rounded-lg border bg-white shadow-sm disabled:opacity-60" :disabled="sendingMail">
-          {{ sendingMail ? 'Sending…' : 'Email summary' }}
-        </button>
-        <NuxtLink to="/sites" class="px-4 py-2 rounded-lg bg-black text-white shadow-sm">Add Site</NuxtLink>
+      <div class="max-w-7xl mx-auto px-1 pb-3">
+        <!-- Tabs -->
+        <div class="inline-flex rounded-xl border bg-gray-50 p-1">
+          <button @click="tab='overview'" :class="['px-4 py-2 rounded-lg text-sm transition flex items-center gap-2', tab==='overview' ? 'bg-white shadow-sm' : 'text-gray-600 hover:bg-white/60']">
+            <span class="i-heroicons-home-20-solid hidden sm:inline" aria-hidden="true"></span>Overview
+          </button>
+          <button @click="tab='months'"   :class="['px-4 py-2 rounded-lg text-sm transition flex items-center gap-2', tab==='months'   ? 'bg-white shadow-sm' : 'text-gray-600 hover:bg-white/60']">
+            <span class="i-heroicons-calendar-days-20-solid hidden sm:inline" aria-hidden="true"></span>Months
+          </button>
+          <button @click="tab='sites'"    :class="['px-4 py-2 rounded-lg text-sm transition flex items-center gap-2', tab==='sites'    ? 'bg-white shadow-sm' : 'text-gray-600 hover:bg-white/60']">
+            <span class="i-heroicons-server-stack-20-solid hidden sm:inline" aria-hidden="true"></span>Sites
+          </button>
+        </div>
+        <!-- Mail state -->
+        <div class="mt-2 flex items-center gap-3 min-h-[1.25rem]">
+          <p v-if="mailMsg" class="text-xs text-emerald-700">{{ mailMsg }}</p>
+          <p v-if="mailErr" class="text-xs text-red-600">{{ mailErr }}</p>
+        </div>
       </div>
-      <p v-if="mailMsg" class="text-xs text-emerald-700">{{ mailMsg }}</p>
-      <p v-if="mailErr" class="text-xs text-red-600">{{ mailErr }}</p>
-    </div>
-
-    <!-- Tabs -->
-    <div class="inline-flex rounded-xl border bg-gray-50 p-1">
-      <button @click="tab='overview'" :class="['px-4 py-2 rounded-lg text-sm transition', tab==='overview' ? 'bg-white shadow-sm' : 'text-gray-600 hover:bg-white/60']">Overview</button>
-      <button @click="tab='months'"   :class="['px-4 py-2 rounded-lg text-sm transition', tab==='months'   ? 'bg-white shadow-sm' : 'text-gray-600 hover:bg-white/60']">Months</button>
-      <button @click="tab='sites'"    :class="['px-4 py-2 rounded-lg text-sm transition', tab==='sites'    ? 'bg-white shadow-sm' : 'text-gray-600 hover:bg-white/60']">Sites</button>
     </div>
 
     <!-- States -->
-    <div v-if="pending">Loading…</div>
-    <div v-else-if="error" class="text-red-600">Failed to load sites.</div>
+    <div v-if="error" class="text-red-600">Failed to load sites.</div>
 
     <template v-else>
       <!-- OVERVIEW -->
-      <div v-show="tab==='overview'" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Maintenance this month (Completed hidden when API provides maintenance rows) -->
-        <div class="rounded-2xl border bg-white p-5 shadow-sm">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-semibold">Maintenance this month</h2>
-            <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.maintenance.length }}</span>
+      <div v-show="tab==='overview'" class="max-w-7xl mx-auto space-y-6">
+        <!-- KPI row -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="rounded-2xl border bg-white p-4 shadow-sm">
+            <div class="text-xs text-gray-500">Maintenance this month</div>
+            <div class="text-2xl font-semibold mt-1">{{ thisMonth?.maintenance.length || 0 }}</div>
           </div>
-          <div class="mt-3 space-y-2" v-if="thisMonth.maintenance.length">
-            <NuxtLink
-              v-for="s in thisMonth.maintenance"
-              :key="s.id"
-              :to="`/site/${s.id}`"
-              class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50"
-            >
-              <div class="min-w-0">
-                <div class="truncate font-medium">{{ s.name || s.id }}</div>
-                <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
-              </div>
-              <div class="flex gap-2 text-xs">
-                <span v-if="s.preRenewal" class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-100">Pre-renewal</span>
-                <span v-if="s.midYear" class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-100">Mid-year</span>
-              </div>
-            </NuxtLink>
+          <div class="rounded-2xl border bg-white p-4 shadow-sm">
+            <div class="text-xs text-gray-500">Reports due</div>
+            <div class="text-2xl font-semibold mt-1">{{ thisMonth?.reports.length || 0 }}</div>
           </div>
-          <p v-else class="text-sm text-gray-500">No maintenance scheduled this month.</p>
+          <div class="rounded-2xl border bg-white p-4 shadow-sm">
+            <div class="text-xs text-gray-500">Renewals this month</div>
+            <div class="text-2xl font-semibold mt-1">{{ thisMonth?.renewals.length || 0 }}</div>
+          </div>
+          <div class="rounded-2xl border bg-white p-4 shadow-sm">
+            <div class="text-xs text-gray-500">Total sites</div>
+            <div class="text-2xl font-semibold mt-1">{{ sites.length }}</div>
+          </div>
         </div>
 
-        <!-- Reports due this month (Completed hidden when API provides maintenance rows) -->
-        <div class="rounded-2xl border bg-white p-5 shadow-sm">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-semibold">Reports due this month</h2>
-            <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.reports.length }}</span>
+        <!-- Two-column panels -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          <!-- Maintenance this month -->
+          <div class="rounded-2xl border bg-white p-5 shadow-sm lg:col-span-1">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-semibold">Maintenance this month</h2>
+              <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.maintenance.length }}</span>
+            </div>
+            <div class="mt-3 space-y-2" v-if="thisMonth.maintenance.length">
+              <NuxtLink
+                v-for="s in thisMonth.maintenance"
+                :key="s.id"
+                :to="`/site/${s.id}`"
+                class="flex items-center justify-between rounded-xl border px-3 py-2 hover:bg-gray-50"
+              >
+                <div class="min-w-0">
+                  <div class="truncate font-medium">{{ s.name || s.id }}</div>
+                  <div class="text-xs text-gray-500 truncate flex items-center gap-1">
+                    <span class="capitalize" :class="envBadge(s.env)">{{ s.env }}</span>
+                    <span class="text-gray-400">•</span>
+                    <span class="truncate">{{ s.id }}</span>
+                  </div>
+                </div>
+                <div class="flex gap-2 text-xs">
+                  <span v-if="s.status" :class="statusClass(s.status)">{{ s.status }}</span>
+                  <span v-else>
+                    <span v-if="s.preRenewal" class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-100">Pre-renewal</span>
+                    <span v-if="s.midYear" class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-100">Mid-year</span>
+                  </span>
+                </div>
+              </NuxtLink>
+            </div>
+            <p v-else class="text-sm text-gray-500">No maintenance scheduled this month.</p>
           </div>
-          <div class="mt-3 space-y-2" v-if="thisMonth.reports.length">
-            <NuxtLink
-              v-for="s in thisMonth.reports"
-              :key="s.id"
-              :to="`/site/${s.id}`"
-              class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50"
-            >
-              <div class="min-w-0">
-                <div class="truncate font-medium">{{ s.name || s.id }}</div>
-                <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
-              </div>
-              <span class="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">Report</span>
-            </NuxtLink>
-          </div>
-          <p v-else class="text-sm text-gray-500">No reports due this month.</p>
-        </div>
 
-        <!-- Renewals this month -->
-        <div class="rounded-2xl border bg-white p-5 shadow-sm">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-semibold">Renewals this month</h2>
-            <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.renewals.length }}</span>
+          <!-- Reports due this month -->
+          <div class="rounded-2xl border bg-white p-5 shadow-sm lg:col-span-1">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-semibold">Reports due this month</h2>
+              <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.reports.length }}</span>
+            </div>
+            <div class="mt-3 space-y-2" v-if="thisMonth.reports.length">
+              <NuxtLink
+                v-for="s in thisMonth.reports"
+                :key="s.id"
+                :to="`/site/${s.id}`"
+                class="flex items-center justify-between rounded-xl border px-3 py-2 hover:bg-gray-50"
+              >
+                <div class="min-w-0">
+                  <div class="truncate font-medium">{{ s.name || s.id }}</div>
+                  <div class="text-xs text-gray-500 truncate flex items-center gap-1">
+                    <span class="capitalize" :class="envBadge(s.env)">{{ s.env }}</span>
+                    <span class="text-gray-400">•</span>
+                    <span class="truncate">{{ s.id }}</span>
+                  </div>
+                </div>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">Report</span>
+              </NuxtLink>
+            </div>
+            <p v-else class="text-sm text-gray-500">No reports due this month.</p>
           </div>
-          <div class="mt-3 space-y-2" v-if="thisMonth.renewals.length">
-            <NuxtLink v-for="s in thisMonth.renewals" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-gray-50">
-              <div class="min-w-0">
-                <div class="truncate font-medium">{{ s.name || s.id }}</div>
-                <div class="text-xs text-gray-500 truncate">{{ s.id }} • <span class="capitalize">{{ s.env }}</span></div>
-              </div>
-              <span class="text-xs text-gray-600">{{ monthName(s.renewMonth) }}</span>
-            </NuxtLink>
+
+          <!-- Renewals this month -->
+          <div class="rounded-2xl border bg-white p-5 shadow-sm lg:col-span-1">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-semibold">Renewals this month</h2>
+              <span class="text-xs rounded-full bg-gray-100 px-2 py-1">{{ thisMonth.renewals.length }}</span>
+            </div>
+            <div class="mt-3 space-y-2" v-if="thisMonth.renewals.length">
+              <NuxtLink v-for="s in thisMonth.renewals" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-xl border px-3 py-2 hover:bg-gray-50">
+                <div class="min-w-0">
+                  <div class="truncate font-medium">{{ s.name || s.id }}</div>
+                  <div class="text-xs text-gray-500 truncate flex items-center gap-1">
+                    <span class="capitalize" :class="envBadge(s.env)">{{ s.env }}</span>
+                    <span class="text-gray-400">•</span>
+                    <span class="truncate">{{ s.id }}</span>
+                  </div>
+                </div>
+                <span class="text-xs text-gray-600">{{ monthName(s.renewMonth) }}</span>
+              </NuxtLink>
+            </div>
+            <p v-else class="text-sm text-gray-500">No renewals this month.</p>
           </div>
-          <p v-else class="text-sm text-gray-500">No renewals this month.</p>
         </div>
       </div>
 
       <!-- MONTHS -->
-      <div v-show="tab==='months'" class="space-y-3">
+      <div v-show="tab==='months'" class="max-w-7xl mx-auto space-y-3">
         <h2 class="text-lg font-semibold">Month-by-month overview</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           <div v-for="m in monthsOverview" :key="m.key" class="rounded-2xl border bg-white p-5 shadow-sm">
@@ -373,8 +446,11 @@ async function testPing () {
                   <NuxtLink v-for="s in m.maintenance" :key="s.id" :to="`/site/${s.id}`" class="flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
                     <div class="truncate">{{ s.name || s.id }}</div>
                     <div class="flex gap-2 text-[11px]">
-                      <span v-if="s.preRenewal" class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-100">Pre</span>
-                      <span v-if="s.midYear" class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100">Mid</span>
+                      <span v-if="s.status" :class="statusClass(s.status)">{{ s.status }}</span>
+                      <span v-else class="flex gap-1">
+                        <span v-if="s.preRenewal" class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-100">Pre</span>
+                        <span v-if="s.midYear" class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100">Mid</span>
+                      </span>
                     </div>
                   </NuxtLink>
                 </div>
@@ -408,45 +484,50 @@ async function testPing () {
       </div>
 
       <!-- SITES -->
-      <div v-show="tab==='sites'" class="space-y-4">
+      <div v-show="tab==='sites'" class="max-w-7xl mx-auto space-y-4">
         <!-- Filters -->
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          <div class="lg:col-span-6">
-            <div class="relative">
-              <label class="block text-xs text-gray-500 mb-1">Search Client</label>
-              <input v-model="q" type="search" placeholder="Search sites…" class="w-full border rounded-xl px-4 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10" />
+        <div class="rounded-2xl border bg-white p-4 shadow-sm">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            <div class="lg:col-span-6">
+              <div class="relative">
+                <label class="block text-xs text-gray-500 mb-1">Search Client</label>
+                <input v-model="q" type="search" placeholder="Search sites…" class="w-full border rounded-xl px-4 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10" />
+              </div>
             </div>
-          </div>
-          <div class="lg:col-span-3">
-            <label class="block text-xs text-gray-500 mb-1">Sort</label>
-            <select v-model="sortBy" class="w-full border rounded-xl px-3 py-2.5 bg-white shadow-sm">
-              <option value="az">A–Z</option>
-              <option value="renew-asc">Next maintenance ↑</option>
-              <option value="renew-desc">Next maintenance ↓</option>
-            </select>
-          </div>
-          <div class="lg:col-span-3">
-            <label class="block text-xs text-gray-500 mb-1">Env</label>
-            <select v-model="envFilter" class="w-full border rounded-xl px-3 py-2.5 bg-white shadow-sm">
-              <option value="all">All</option>
-              <option value="production">prod</option>
-              <option value="staging">stage</option>
-              <option value="dev">dev</option>
-              <option value="test">test</option>
-            </select>
+            <div class="lg:col-span-3">
+              <label class="block text-xs text-gray-500 mb-1">Sort</label>
+              <select v-model="sortBy" class="w-full border rounded-xl px-3 py-2.5 bg-white shadow-sm">
+                <option value="az">A–Z</option>
+                <option value="renew-asc">Next maintenance ↑</option>
+                <option value="renew-desc">Next maintenance ↓</option>
+              </select>
+            </div>
+            <div class="lg:col-span-3">
+              <label class="block text-xs text-gray-500 mb-1">Env</label>
+              <select v-model="envFilter" class="w-full border rounded-xl px-3 py-2.5 bg-white shadow-sm">
+                <option value="all">All</option>
+                <option value="production">prod</option>
+                <option value="staging">stage</option>
+                <option value="dev">dev</option>
+                <option value="test">test</option>
+              </select>
+            </div>
           </div>
         </div>
 
         <!-- Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          <NuxtLink
+        <div v-if="pending" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div v-for="i in 6" :key="i" class="h-40 rounded-2xl border bg-white shadow-sm animate-pulse"></div>
+        </div>
+
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div
             v-for="s in filtered"
             :key="s.id"
-            :to="`/site/${s.id}`"
             class="group block rounded-2xl border p-5 bg-white shadow-sm hover:shadow-md transition"
           >
             <div class="flex items-start justify-between gap-3">
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 min-w-0">
                 <div class="h-10 w-10 rounded-xl border bg-gray-50 flex items-center justify-center overflow-hidden">
                   <img
                     v-if="hostOf(s) && !favState[s.id]?.hide"
@@ -462,37 +543,25 @@ async function testPing () {
                   </span>
                 </div>
 
-                <div>
-                  <h3 class="text-base font-semibold leading-tight">{{ s.name || s.id }}</h3>
+                <div class="min-w-0">
+                  <h3 class="text-base font-semibold leading-tight truncate">{{ s.name || s.id }}</h3>
                   <div class="flex items-center gap-2 text-[11px] text-gray-500 truncate mt-0.5">
                     <span v-if="s.websiteUrl">
-                      <a :href="s.websiteUrl" target="_blank" class="hover:underline">Website</a>
+                      <a :href="s.websiteUrl" target="_blank" rel="noopener" class="hover:underline">Website</a>
                     </span>
                     <span v-if="s.gitUrl">
-                      <span v-if="s.websiteUrl" class="opacity-50">•</span>
-                      <a :href="s.gitUrl" target="_blank" class="hover:underline">Repo</a>
-                    </span>
-                    <span v-if="s.primaryContact?.email || s.primaryContact?.name || s.primaryContact?.phone">
-                      <span v-if="s.websiteUrl || s.gitUrl" class="opacity-50">•</span>
-                      <span class="truncate">
-                        {{ s.primaryContact?.name || 'Contact' }}
-                        <template v-if="s.primaryContact?.email">
-                          — <a :href="`mailto:${s.primaryContact.email}`" class="hover:underline">{{ s.primaryContact.email }}</a>
-                        </template>
-                        <template v-else-if="s.primaryContact?.phone">
-                          — <a :href="`tel:${s.primaryContact.phone}`" class="hover:underline">{{ s.primaryContact.phone }}</a>
-                        </template>
-                      </span>
+                      <span v-if="s.websiteUrl" class="opacity-50 mr-2">•</span>
+                      <a :href="s.gitUrl" target="_blank" rel="noopener" class="hover:underline">Repo</a>
                     </span>
                   </div>
-                  <div class="flex items-center gap-2 text-xs text-gray-500">
-                    <span>{{ s.id }}</span>
+                  <div class="flex items-center gap-2 text-xs text-gray-500 truncate">
+                    <span class="truncate">{{ s.id }}</span>
                     <span class="h-1 w-1 rounded-full bg-gray-300"></span>
-                    <span class="capitalize">{{ s.env }}</span>
+                    <span :class="envBadge(s.env)">{{ s.env }}</span>
                   </div>
                 </div>
               </div>
-              <div class="text-right">
+              <div class="text-right shrink-0">
                 <div class="text-xs text-gray-500">Next maintenance</div>
                 <div class="text-sm font-medium">
                   <span v-if="s.nextMaintenance">{{ formatRenew(s.nextMaintenance) }}</span>
@@ -501,17 +570,24 @@ async function testPing () {
               </div>
             </div>
 
-            <div class="mt-4 flex items-center justify-between text-xs text-gray-500">
-              <span class="inline-flex items-center gap-1 group-hover:text-gray-700">Open details →</span>
+            <div class="mt-4 flex items-center justify-between text-xs text-gray-600">
+              <NuxtLink :to="`/site/${s.id}`" class="inline-flex items-center gap-1 group-hover:text-gray-800">
+                Open details →
+              </NuxtLink>
               <span v-if="s.tags?.length" class="inline-flex gap-1">
                 <span v-for="t in s.tags.slice(0,3)" :key="t" class="px-2 py-0.5 rounded-full bg-gray-100 border">{{ t }}</span>
               </span>
             </div>
-          </NuxtLink>
+          </div>
+        </div>
+
+        <div v-if="!pending && filtered.length === 0" class="rounded-2xl border bg-white p-8 text-center text-gray-600">
+          No sites match your filters.
         </div>
       </div>
+
       <!-- Ping Test -->
-      <div class="rounded-2xl border bg-white p-4 shadow-sm">
+      <div class="max-w-7xl mx-auto rounded-2xl border bg-white p-4 shadow-sm">
         <div class="flex items-center gap-2">
           <input
             v-model="testUrl"
@@ -534,7 +610,13 @@ async function testPing () {
           </div>
         </div>
       </div>
-
     </template>
   </div>
 </template>
+
+<style scoped>
+/* Icon utility classes if using UnoCSS/Icons; safe to ignore otherwise */
+.i-heroicons-home-20-solid::before{content:''}
+.i-heroicons-calendar-days-20-solid::before{content:''}
+.i-heroicons-server-stack-20-solid::before{content:''}
+</style>
