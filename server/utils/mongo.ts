@@ -26,11 +26,26 @@ export async function getDb(): Promise<Db> {
     { 'run.timestamp': -1 },
     { name: 'ts_desc' }
   )
-  await db.collection('changelogs').createIndex({ 'changes.updated.name': 1 }, { name: 'pkg_updated_name' })
-  await db.collection('changelogs').createIndex({ 'changes.added.name': 1 },  { name: 'pkg_added_name' })
-  await db.collection('changelogs').createIndex({ 'changes.removed.name': 1 },{ name: 'pkg_removed_name' })
-  await db.collection('users').createIndex({ email: 1 }, { name: 'user_email_unique', unique: true })
-  await db.collection('users').createIndex({ role: 1 }, { name: 'user_role' })
+  await db.collection('changelogs').createIndex(
+    { 'changes.updated.name': 1 }, 
+    { name: 'pkg_updated_name' }
+  )
+  await db.collection('changelogs').createIndex(
+    { 'changes.added.name': 1 },  
+    { name: 'pkg_added_name' }
+  )
+  await db.collection('changelogs').createIndex(
+    { 'changes.removed.name': 1 },
+    { name: 'pkg_removed_name' }
+  )
+  await db.collection('users').createIndex(
+    { email: 1 }, 
+    { name: 'user_email_unique', unique: true }
+  )
+  await db.collection('users').createIndex(
+    { role: 1 }, 
+    { name: 'user_role' }
+  )
   await db.collection('notes').createIndex(
     { 'site.id': 1, pinned: -1, updatedAt: -1 },
     { name: 'notes_site_pin_updated' }
@@ -47,7 +62,10 @@ export async function getDb(): Promise<Db> {
     { 'site.id': 1, 'site.env': 1, 'entry.created_at': -1, receivedAt: -1 },
     { name: 'formlogs_site_env_time' }
   )
-  await db.collection('form_logs').createIndex({ 'entry.email': 1 }, { name: 'formlogs_email' })
+  await db.collection('form_logs').createIndex(
+    { 'entry.email': 1 }, 
+    { name: 'formlogs_email' }
+  )
 
   // --- NEW: maintenance indexes ---
   await db.collection('maintenance').createIndex(

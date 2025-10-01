@@ -54,6 +54,7 @@ export default defineEventHandler(async (event) => {
         phone: (body.primaryContact.phone || '').trim(),
       }
     : null
+  const groupEmail = body?.groupEmail === 'string' ? body.groupEmail : ''
 
   // Window & rebuild
   const rebuild        = !!body?.rebuild
@@ -170,7 +171,8 @@ export default defineEventHandler(async (event) => {
       renewMonth,
       websiteUrl: savedSite?.websiteUrl || null,
       gitUrl: savedSite?.gitUrl || null,
-      primaryContact: savedSite?.primaryContact || null
+      primaryContact: savedSite?.primaryContact || null,
+      groupEmail: savedSite?.groupEmail || null
     },
     scheduleWindow: {
       from: toISODate(windowStart),

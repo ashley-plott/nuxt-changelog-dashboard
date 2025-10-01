@@ -1,50 +1,90 @@
-import { z } from 'zod'
-
-const qSchema = z.object({
-  site: z.string().min(1),
-  env: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(20),
-  email: z.string().email().optional(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
-})
+// server/api/form-logs.get.ts
+import { defineEventHandler, getQuery, createError } from 'h3'
+import { getDb } from '~/server/utils/mongo'
 
 export default defineEventHandler(async (event) => {
-  const q = qSchema.parse(getQuery(event))
-  const storage = useStorage('data:submissions')
-  const keys = await storage.getKeys()
-  const out: any[] = []
+  const q = getQuery(event) as Record<string, string | string[] | undefined>
 
-  for (const k of keys) {
-    if (!k.endsWith('.json')) continue
-    const rec = await storage.getItem<any>(k).catch(() => null)
-    if (!rec || rec._kind !== 'gf_submission') continue
+  const site = (q.site as string || '').trim()
+  if (!site) throw createError({ statusCode: 400, statusMessage: 'Missing required query: site' })
 
-    // Filter by site/env
-    if (!rec.site || String(rec.site.id) !== q.site) continue
-    if (q.env && String(rec.site.env) !== String(q.env)) continue
+  const env    = (q.env as string | undefined)?.trim()
+  const emailQ = (q.email as string | undefined)?.trim()
+  let limit    = Number(q.limit ?? 20); if (!Number.isFinite(limit) || limit < 1) limit = 20; if (limit > 200) limit = 200
 
-    // Filter by email
-    if (q.email && String(rec.entry?.email || '').toLowerCase() !== q.email.toLowerCase()) continue
+  const fromStr = (q.from as string | undefined)?.trim()
+  const toStr   = (q.to as string | undefined)?.trim()
+  const fromDt  = fromStr ? new Date(fromStr) : undefined
+  const toDt    = toStr ? new Date(toStr) : undefined
 
-    // Filter by date window (use entry.created_at or receivedAt)
-    const ts = new Date(rec.entry?.created_at || rec.receivedAt).getTime()
-    if (q.from && ts < new Date(q.from).getTime()) continue
-    if (q.to && ts > new Date(q.to).getTime()) continue
+  const db  = await getDb()                 // uses MONGODB_URI + MONGODB_DB
+  const col = db.collection('form_logs')    // your collection name
 
-    // Shape to your FormLog interface
-    out.push({
-      _id: k,
-      site: rec.site,
-      form: rec.form,
-      entry: rec.entry,
-      fields: rec.fieldsMap, // label → value (string)
-      run: rec.run,
-      receivedAt: rec.receivedAt,
-    })
+  // Base filter (INDEX-FRIENDLY)
+  const baseMatch: any = {
+    _kind: 'gf_submission',
+    'site.id': site,
+  }
+  if (env)   baseMatch['site.env'] = env
+  if (emailQ) baseMatch['entry.email'] = emailQ.toLowerCase() // we store lowercased emails
+
+  const pipeline: any[] = [
+    { $match: baseMatch },
+
+    // Ensure we always have a Date to filter/sort by, even if older docs lack `when`
+    {
+      $addFields: {
+        _when: {
+          $ifNull: [
+            '$when',
+            { $ifNull: [
+              '$createdAt',
+              '$receivedAt',
+            ] }
+          ]
+        }
+      }
+    },
+  ]
+
+  // Optional date window on _when
+  if (fromDt || toDt) {
+    const cond: any = {}
+    if (fromDt) cond.$gte = fromDt
+    if (toDt)   cond.$lte = toDt
+    pipeline.push({ $match: { _when: cond } })
   }
 
-  // Sort newest first, limit
-  out.sort((a,b) => new Date(b.entry?.created_at || b.receivedAt).getTime() - new Date(a.entry?.created_at || a.receivedAt).getTime())
-  return { items: out.slice(0, q.limit) }
+  pipeline.push(
+    { $sort: { _when: -1 } },
+    { $limit: limit },
+    {
+      $project: {
+        // shape for your UI
+        site: 1,
+        form: 1,
+        fields: '$fieldsMap',
+        run: 1,
+        entry: {
+          email: '$entry.email',
+          created_at: {
+            $dateToString: {
+              date: { $ifNull: ['$createdAt', '$receivedAt'] },
+              format: '%Y-%m-%dT%H:%M:%S.%LZ',
+              timezone: 'UTC'
+            }
+          }
+        },
+        receivedAt: {
+          $dateToString: { date: '$receivedAt', format: '%Y-%m-%dT%H:%M:%S.%LZ', timezone: 'UTC' }
+        }
+      }
+    }
+  )
+
+  const docs = await col.aggregate(pipeline).toArray()
+
+  // stringify _id for the client
+  const items = docs.map((d: any) => ({ _id: String(d._id), ...d }))
+  return { items }
 })

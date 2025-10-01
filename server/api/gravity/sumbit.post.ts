@@ -1,6 +1,8 @@
-import { getHeader, createError } from 'h3'
-import { z } from 'zod'
+// server/api/gravity/submit.post.ts
 import crypto from 'node:crypto'
+import { defineEventHandler, readRawBody, getHeader, createError } from 'h3'
+import { z } from 'zod'
+import { getDb } from '~/server/utils/mongo'
 
 const payloadSchema = z.object({
   form: z.object({
@@ -54,6 +56,7 @@ function toFieldsMap(fields: Array<{ label?: string; id: string; value: any }>) 
   }
   return map
 }
+const toDateOrNull = (s?: string) => s ? new Date(s) : null
 
 export default defineEventHandler(async (event) => {
   const secret = process.env.NUXT_GRAVITY_SECRET
@@ -71,34 +74,49 @@ export default defineEventHandler(async (event) => {
   if (!v.success) throw createError({ statusCode: 422, statusMessage: 'Invalid payload', data: v.error.flatten() })
   const payload = v.data
 
-  // Site metadata from WP (optional but recommended)
+  // From WP headers
   const siteId  = getHeader(event, 'x-site-id') || null
   const siteEnv = (getHeader(event, 'x-site-env') || 'production') as 'production'|'staging'|'dev'|'test'
   const phpVersion = getHeader(event, 'x-php-version') || ''
   const wpVersion  = getHeader(event, 'x-wp-version')  || ''
   const gfVersion  = getHeader(event, 'x-gf-version')  || ''
 
-  // Domain gate
+  // Gate by domain
   const email = extractEmail(payload.fields as any)
   if (!isPlottEmail(email)) {
     return { ok: true, forwarded: false, reason: 'Not a @plott.co.uk email' }
   }
 
-  // Build a record that your /api/form-logs will read easily
-  const stored = {
-    _kind: 'gf_submission',
-    receivedAt: new Date().toISOString(),
+  // Build doc
+  const receivedAt = new Date()
+  const createdAt  = toDateOrNull(payload.entry.created_at || undefined)
+  const when       = createdAt || receivedAt
+  const fieldsMap  = toFieldsMap(payload.fields as any)
+  const dedupe     = payload.entry.id != null ? `${payload.form.id}:${payload.entry.id}` : undefined
+
+  const doc = {
+    _kind: 'gf_submission' as const,
     site: siteId ? { id: siteId, env: siteEnv } : undefined,
     form: { id: String(payload.form.id), title: payload.form.title || 'Form' },
-    entry: { email: email || undefined, created_at: payload.entry.created_at || undefined },
-    fieldsMap: toFieldsMap(payload.fields as any),
+    entry: { email: email?.toLowerCase() || undefined, created_at: payload.entry.created_at || undefined },
+    fieldsMap,
     run: { php_version: phpVersion, wp_version: wpVersion, gf_version: gfVersion },
-    raw: payload, // still keep original for audits
+    raw: payload,
+    // canonical timestamps
+    receivedAt,   // Date
+    createdAt,    // Date | null
+    when,         // Date
+    dedupe,       // string | undefined
   }
 
-  const storage = useStorage('data:submissions')
-  const key = `${Date.now()}_${payload.form.id}_${payload.entry.id ?? 'noid'}.json`
-  await storage.setItem(key, stored)
+  const db  = await getDb()
+  const col = db.collection('form_logs')
 
-  return { ok: true, forwarded: true, email, formId: String(payload.form.id), site: stored.site }
+  if (dedupe) {
+    await col.updateOne({ dedupe }, { $setOnInsert: doc }, { upsert: true })
+  } else {
+    await col.insertOne(doc as any)
+  }
+
+  return { ok: true, forwarded: true, email, formId: String(payload.form.id), site: doc.site }
 })
