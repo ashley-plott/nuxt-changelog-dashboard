@@ -1,6 +1,6 @@
 <!-- pages/site/[id].vue (sleek UI + refined calendar + keyboard shortcuts, no dark mode) -->
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch, watchEffect } from 'vue'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch, watchEffect, defineComponent, h } from 'vue'
 import { useRoute, useRouter, useFetch, useAsyncData, useRequestHeaders } from '#imports'
 
 definePageMeta({ middleware: 'auth' }) // protect page
@@ -59,11 +59,7 @@ const delMsg = ref<string|null>(null)
 
 function firstOfMonthUTC(d = new Date()) { return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)) }
 function formatMonth(d: Date) { return d.toLocaleString(undefined, { month: 'long', year: 'numeric' }) }
-
-// Extra date formatting for nicer calendar rows
-function formatDateLine(d: Date) {
-  return d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
-}
+function formatDateLine(d: Date) { return d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) }
 function dayNum(d: Date) { return String(d.getDate()).padStart(2, '0') }
 function dayWk(d: Date)  { return d.toLocaleString(undefined, { weekday: 'short' }) }
 
@@ -101,6 +97,12 @@ const displayWebsiteUrl = computed(() => {
 })
 const displayGitUrl = computed(() => site.value?.gitUrl || '')
 const displayContact = computed<PrimaryContact | null>(() => site.value?.primaryContact || null)
+
+const renewMonthName = computed(() => {
+  const month = (site.value?.renewMonth || 1) - 1
+  const date = new Date(2000, Math.max(0, Math.min(11, month)), 1)
+  return date.toLocaleString(undefined, { month: 'long' })
+})
 
 function isRenewalMonthUTC(monthStartUTC: Date) {
   const r = Number(site.value?.renewMonth || 0)
@@ -168,8 +170,6 @@ const notes = ref<{ items:any[] } | null>(null)
 async function loadNotes(){
   notes.value = await $fetch(`/api/sites/${id}/notes`, { query: { env: site.value?.env }, headers })
 }
-onMounted(() => { if (tab.value === 'notes' && !notes.value) loadNotes() })
-watch(tab, t => { if (t === 'notes' && !notes.value) loadNotes() })
 const noteForm = reactive({ title: '', body: '', pinned: false })
 const noteSaving = ref(false)
 async function addNote(){
@@ -184,6 +184,9 @@ async function addNote(){
 function canEditNote(n:any){ if (!authed) return false; return my.role==='admin'||my.role==='manager'||String(n.author?.id)===String(my.id) }
 async function saveNote(n:any, patch:any){ await $fetch(`/api/sites/${id}/notes/${n._id}`, { method:'PATCH', body:patch, headers }); await loadNotes() }
 async function delNote(n:any){ if (!confirm('Delete this note?')) return; await $fetch(`/api/sites/${id}/notes/${n._id}`, { method:'DELETE', headers }); await loadNotes() }
+
+onMounted(() => { if (tab.value === 'notes' && !notes.value) loadNotes() })
+watch(tab, t => { if (t === 'notes' && !notes.value) loadNotes() })
 
 // Details (edit + rebuild)
 const canManageSite = computed(() => authed && (my?.role==='admin'||my?.role==='manager'))
@@ -284,7 +287,6 @@ function startChord(){
   chord.timer = setTimeout(() => { chord.waiting = false }, 800)
 }
 function handleKeydown(e: KeyboardEvent){
-  // Ignore when typing in inputs/textareas/selects
   const t = e.target as HTMLElement
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
 
@@ -301,7 +303,6 @@ function handleKeydown(e: KeyboardEvent){
     e.preventDefault();
     return
   }
-  // singles
   if (e.key === 'r') { refreshSite(); e.preventDefault(); }
   if (e.key === 'e') { tab.value = 'details'; e.preventDefault(); }
   if (e.key >= '1' && e.key <= '5') {
@@ -311,47 +312,65 @@ function handleKeydown(e: KeyboardEvent){
   }
 }
 
-// inside <script setup> of pages/site/[id].vue
+// CI badge
 const latestCi = ref<any>(null)
 const repoSlug = computed(() => {
   const url = displayGitUrl.value || ''
   if (!url) return ''
-  try {
-    // https://github.com/owner/repo(.git)
-    return new URL(url).pathname.replace(/^\//, '').replace(/\.git$/, '')
-  } catch {
-    // git@github.com:owner/repo(.git)
+  try { return new URL(url).pathname.replace(/^\//, '').replace(/\.git$/, '') }
+  catch {
     const m = url.match(/github\.com[:/](.+?)(?:\.git)?$/i)
     return m ? m[1] : ''
   }
 })
-
 watchEffect(async () => {
   if (!repoSlug.value) return
-  latestCi.value = await $fetch('/api/ci/latest', {
-    query: { repo: repoSlug.value, env: site.value?.env || 'production' }
-  }).catch(() => null)
+  latestCi.value = await $fetch('/api/ci/latest', { query: { repo: repoSlug.value, env: site.value?.env || 'production' } }).catch(() => null)
 })
-
 function ciBadgeClass(status?: string) {
-  switch (status) {
-    case 'success': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    case 'failure': return 'bg-rose-50 text-rose-700 border-rose-200'
+  switch ((status||'').toLowerCase()) {
+    case 'success':
+    case 'passed': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    case 'failure':
+    case 'failed':  return 'bg-rose-50 text-rose-700 border-rose-200'
+    case 'running': return 'bg-amber-50 text-amber-800 border-amber-200'
     case 'cancelled': return 'bg-gray-50 text-gray-600 border-gray-200'
-    default: return 'bg-amber-50 text-amber-800 border-amber-200'
+    default: return 'bg-gray-50 text-gray-700 border-gray-200'
   }
 }
-
 watch([repoSlug, () => site.value?.env], async ([slug, env]) => {
   if (!slug) { latestCi.value = null; return }
-  latestCi.value = await $fetch('/api/ci/latest', {
-    query: { repo: slug, env: env || 'production' }
-  }).catch(() => null)
+  latestCi.value = await $fetch('/api/ci/latest', { query: { repo: slug, env: env || 'production' } }).catch(() => null)
 }, { immediate: true })
 
+// Compact header on scroll
+const compact = ref(false)
+function onScroll () { compact.value = window.scrollY > 16 }
+onMounted(() => { window.addEventListener('keydown', handleKeydown); window.addEventListener('scroll', onScroll, { passive: true }) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown); window.removeEventListener('scroll', onScroll) })
 
-onMounted(() => { window.addEventListener('keydown', handleKeydown) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown) })
+// TabButton (inline, Vue 3)
+const TabButton = defineComponent({
+  name: 'TabButton',
+  props: { label: { type: String, required: true }, active: { type: Boolean, default: false }, count: { type: [Number, String], default: undefined }, icon: { type: String, default: '' } },
+  emits: ['click'],
+  setup(props, { emit }) {
+    return () => h('button', {
+      'aria-current': props.active ? 'page' : undefined,
+      class: [
+        'group relative px-4 py-2 rounded-xl text-sm transition flex items-center gap-2',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10',
+        props.active ? 'bg-white shadow-sm ring-1 ring-gray-200 text-gray-900' : 'text-gray-600 hover:bg-white/70'
+      ],
+      onClick: () => emit('click')
+    }, [
+      props.icon ? h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', class: 'h-4 w-4', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [ h('path', { d: props.icon }) ]) : null,
+      h('span', null, props.label),
+      typeof props.count !== 'undefined' ? h('span', { class: 'text-[10px] rounded-full bg-white/90 px-1.5 border border-black/5' }, String(props.count)) : null,
+      props.active ? h('span', { class: 'absolute -bottom-1 left-3 right-3 h-0.5 rounded-full bg-gray-300' }) : null
+    ])
+  }
+})
 
 defineExpose({ refreshSite })
 </script>
@@ -359,71 +378,102 @@ defineExpose({ refreshSite })
 <template>
   <div class="min-h-screen bg-neutral-50">
     <!-- Sticky Header -->
-    <header class="sticky top-0 z-10 border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3">
+    <header
+      class="sticky top-0 z-50 border-b border-black/5 bg-white/60 backdrop-blur-xl supports-[backdrop-filter]:bg-white/50"
+      :class="compact ? 'py-2' : 'py-3 sm:py-4'"
+    >
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex items-start gap-4">
-          <div class="h-12 w-12 rounded-2xl border bg-white flex items-center justify-center overflow-hidden shadow-sm">
-            <img
-              v-if="siteHostname && !favHide"
-              :src="favTriedFallback ? favFallback : favPrimary"
-              @error="onFavError"
-              :alt="site?.name || site?.id || 'Site'"
-              class="h-6 w-6"
-              decoding="async"
-              loading="eager"
-            />
-            <span v-else class="text-sm font-semibold text-gray-600">{{ siteInitial }}</span>
+          <!-- Brand / favicon -->
+          <div class="relative h-12 w-12 sm:h-14 sm:w-14 rounded-2xl overflow-hidden shadow-sm ring-1 ring-black/5 bg-gradient-to-br from-white to-gray-50 flex items-center justify-center">
+            <img v-if="siteHostname && !favHide" :src="favTriedFallback ? favFallback : favPrimary" @error="onFavError" :alt="site?.name || site?.id || 'Site'" class="h-7 w-7 sm:h-8 sm:w-8 object-contain" decoding="async" loading="eager" />
+            <span v-else class="text-sm sm:text-base font-semibold text-gray-700">{{ siteInitial }}</span>
+            <span class="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/60"></span>
           </div>
-          <div class="min-w-0">
+
+          <!-- Title & meta -->
+          <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap">
-              <h1 class="text-xl sm:text-2xl font-semibold tracking-tight truncate">{{ site?.name || site?.id || id }}</h1>
-              <span v-if="site" class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs bg-gray-50">
+              <h1 class="text-[20px] sm:text-2xl md:text-3xl font-semibold tracking-tight text-gray-900 truncate">{{ site?.name || site?.id || id }}</h1>
+
+              <span v-if="site" class="inline-flex items-center gap-1 rounded-full border border-black/5 bg-gray-50 px-2.5 py-1 text-xs text-gray-700">
                 <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
                 {{ site.env }}
               </span>
-              <span v-if="site" class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs bg-gray-50">
-                Renew: {{ new Date(2000, (site.renewMonth || 1)-1, 1).toLocaleString(undefined, { month:'long' }) }}
+
+              <span v-if="site" class="inline-flex items-center gap-1 rounded-full border border-black/5 bg-gray-50 px-2.5 py-1 text-xs text-gray-700" :title="`Renews in ${renewMonthName}`">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg>
+                Renew: {{ renewMonthName }}
               </span>
+
+              <!-- Contact (nicer display) -->
+              <div v-if="displayContact?.name || displayContact?.email || displayContact?.phone" class="relative">
+                <details class="group inline-block">
+                  <summary class="list-none inline-flex items-center gap-1 rounded-full border border-black/5 bg-white/60 px-2.5 py-1 text-xs text-gray-700 cursor-pointer hover:shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92V21a2 2 0 0 1-2.18 2A19.72 19.72 0 0 1 3 5.18 2 2 0 0 1 5 3h4.09a2 2 0 0 1 2 1.72l.57 3.42a2 2 0 0 1-.55 1.86L9.91 12a16 16 0 0 0 6.18 6.18l2-1.2a2 2 0 0 1 1.86-.55l3.42.57A2 2 0 0 1 22 16.92z"/></svg>
+                    Contact
+                  </summary>
+                  <div class="absolute mt-2 w-72 sm:w-80 rounded-xl border border-black/5 bg-white shadow-md p-3 z-10">
+                    <div class="flex items-start gap-3">
+                      <div class="h-9 w-9 rounded-lg bg-gray-50 border flex items-center justify-center">
+                        <span class="text-sm font-semibold">{{ (displayContact?.name || (displayContact?.email || displayContact?.phone || '?')).slice(0,1).toUpperCase() }}</span>
+                      </div>
+                      <div class="min-w-0">
+                        <div class="font-medium truncate">{{ displayContact?.name || '—' }}</div>
+                        <div class="mt-1 space-y-1 text-sm">
+                          <div v-if="displayContact?.email" class="flex items-center justify-between gap-2">
+                            <a :href="`mailto:${displayContact.email}`" class="truncate hover:underline underline-offset-2">{{ displayContact.email }}</a>
+                            <button class="rounded border px-2 py-1 text-[11px] hover:bg-gray-50" @click.stop="copyToClipboard(displayContact.email!)">Copy</button>
+                          </div>
+                          <div v-if="displayContact?.phone" class="flex items-center justify-between gap-2">
+                            <a :href="`tel:${displayContact.phone}`" class="truncate hover:underline underline-offset-2">{{ displayContact.phone }}</a>
+                            <button class="rounded border px-2 py-1 text-[11px] hover:bg-gray-50" @click.stop="copyToClipboard(displayContact.phone!)">Copy</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="mt-3 grid grid-cols-2 gap-2">
+                      <a v-if="displayContact?.email" :href="`mailto:${displayContact.email}`" class="inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">Email</a>
+                      <a v-if="displayContact?.phone" :href="`tel:${displayContact.phone}`" class="inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">Call</a>
+                    </div>
+                  </div>
+                </details>
+              </div>
             </div>
-            <p class="mt-1 text-xs text-gray-600 truncate">
-              <button class="underline decoration-dotted underline-offset-2 hover:text-gray-800" @click="copyToClipboard(site?.id||id)" title="Copy site ID">
-                {{ site?.id || id }}
-              </button>
-              <span v-if="displayWebsiteUrl"> • <a :href="displayWebsiteUrl" target="_blank" class="hover:underline underline-offset-2">Website</a></span>
-              <span v-if="displayGitUrl"> • <a :href="displayGitUrl" target="_blank" class="hover:underline underline-offset-2">Repo</a></span>
-              <span v-if="displayContact?.name || displayContact?.email || displayContact?.phone">
-                • Contact:
-                <span v-if="displayContact?.name">{{ displayContact.name }}</span>
-                <span v-if="displayContact?.email"> — <a :href="`mailto:${displayContact.email}`" class="hover:underline underline-offset-2">{{ displayContact.email }}</a></span>
-                <span v-if="displayContact?.phone"> — <a :href="`tel:${displayContact.phone}`" class="hover:underline underline-offset-2">{{ displayContact.phone }}</a></span>
-              </span>
+
+            <p class="mt-1 text-xs sm:text-[13px] text-gray-600 truncate flex items-center gap-2">
+              <button class="underline decoration-dotted underline-offset-2 hover:text-gray-900" @click="copyToClipboard(site?.id || id)" title="Copy site ID">{{ site?.id || id }}</button>
+              <span v-if="displayWebsiteUrl" class="text-gray-300">•</span>
+              <a v-if="displayWebsiteUrl" :href="displayWebsiteUrl" target="_blank" class="hover:underline underline-offset-2 hover:text-gray-900">Website</a>
+              <span v-if="displayGitUrl" class="text-gray-300">•</span>
+              <a v-if="displayGitUrl" :href="displayGitUrl" target="_blank" class="hover:underline underline-offset-2 hover:text-gray-900">Repo</a>
             </p>
           </div>
+
+          <!-- Actions -->
           <div class="ml-auto flex flex-wrap items-center gap-2">
-            <NuxtLink to="/dashboard" class="inline-flex items-center rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">← Back</NuxtLink>
-            <a v-if="displayWebsiteUrl" :href="displayWebsiteUrl" target="_blank" class="inline-flex items-center rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">Open site</a>
-            <a v-if="displayGitUrl" :href="displayGitUrl" target="_blank" class="inline-flex items-center rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">Open repo</a>
-            <a v-if="latestCi?.run?.ci_url"
-              :href="latestCi.run.ci_url"
-              target="_blank"
-              :class="['inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs', ciBadgeClass(latestCi.status)]">
-              CI: {{ latestCi.status }}
-            </a>
+            <NuxtLink to="/dashboard" class="inline-flex items-center rounded-xl border border-black/5 bg-white px-3 py-1.5 text-sm shadow-sm hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">← Back</NuxtLink>
+            <a v-if="displayWebsiteUrl" :href="displayWebsiteUrl" target="_blank" class="inline-flex items-center rounded-xl border border-black/5 bg-white px-3 py-1.5 text-sm shadow-sm hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">Open site</a>
+            <a v-if="displayGitUrl" :href="displayGitUrl" target="_blank" class="inline-flex items-center rounded-xl border border-black/5 bg-white px-3 py-1.5 text-sm shadow-sm hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">Open repo</a>
+            <a v-if="latestCi?.run?.ci_url" :href="latestCi.run.ci_url" target="_blank" :class="['inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-sm', ciBadgeClass(latestCi.status)]"><span class="hidden sm:inline">CI:</span> {{ latestCi.status }}</a>
           </div>
         </div>
 
         <!-- Tabs -->
-        <div class="mt-3">
-          <div class="inline-flex rounded-2xl border bg-gray-50 p-1 shadow-sm">
-            <button @click="tab='calendar'"  :class="['px-4 py-2 rounded-xl text-sm transition flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10', tab==='calendar'  ? 'bg-white shadow-sm ring-1 ring-gray-200' : 'text-gray-600 hover:bg-white/60']">Calendar <span class="text-[10px] rounded-full bg-white px-1.5 border">{{ counts.calendar }}</span></button>
-            <button @click="tab='changelog'" :class="['px-4 py-2 rounded-xl text-sm transition flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10', tab==='changelog' ? 'bg-white shadow-sm ring-1 ring-gray-200' : 'text-gray-600 hover:bg-white/60']">Changelog <span class="text-[10px] rounded-full bg-white px-1.5 border">{{ counts.changelog }}</span></button>
-            <button @click="tab='forms'"     :class="['px-4 py-2 rounded-xl text-sm transition flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10', tab==='forms'     ? 'bg-white shadow-sm ring-1 ring-gray-200' : 'text-gray-600 hover:bg-white/60']">Forms <span class="text-[10px] rounded-full bg-white px-1.5 border">{{ counts.forms }}</span></button>
-            <button @click="tab='notes'"     :class="['px-4 py-2 rounded-xl text-sm transition flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10', tab==='notes'     ? 'bg-white shadow-sm ring-1 ring-gray-200' : 'text-gray-600 hover:bg-white/60']">Notes <span class="text-[10px] rounded-full bg-white px-1.5 border">{{ counts.notes }}</span></button>
-            <button @click="tab='details'"   :class="['px-4 py-2 rounded-xl text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10', tab==='details'   ? 'bg-white shadow-sm ring-1 ring-gray-200' : 'text-gray-600 hover:bg-white/60']">Details</button>
+        <div class="mt-4">
+          <div class="inline-flex items-center gap-1 rounded-2xl border border-black/5 bg-gray-50/80 p-1 shadow-sm">
+            <TabButton label="Calendar"  :active="tab==='calendar'"  @click="tab='calendar'"  :count="counts.calendar"  icon="M8 7v10m8-10v10M4 5h16M4 19h16"/>
+            <TabButton label="Changelog" :active="tab==='changelog'" @click="tab='changelog'" :count="counts.changelog" icon="M5 12h14M5 6h14M5 18h10"/>
+            <TabButton label="Forms"     :active="tab==='forms'"     @click="tab='forms'"     :count="counts.forms"     icon="M4 7h16M4 12h16M4 17h8"/>
+            <TabButton label="Notes"     :active="tab==='notes'"     @click="tab='notes'"     :count="counts.notes"     icon="M12 20l9-5-9-5-9 5 9 5z"/>
+            <TabButton label="Details"   :active="tab==='details'"   @click="tab='details'"   :count="undefined"        icon="M12 20v-6m0-8v2m0 0a4 4 0 110 8 4 4 0 010-8z"/>
           </div>
-          <p class="text-[11px] text-gray-500 mt-1">Shortcuts: <kbd class="kbd">g</kbd> then <kbd class="kbd">c</kbd>/<kbd class="kbd">l</kbd>/<kbd class="kbd">f</kbd>/<kbd class="kbd">n</kbd>/<kbd class="kbd">d</kbd>. Also <kbd class="kbd">1–5</kbd>, <kbd class="kbd">r</kbd> to refresh, <kbd class="kbd">e</kbd> details.</p>
+          <p class="text-[11px] text-gray-500 mt-1">
+            Shortcuts: <kbd class="kbd">g</kbd> then <kbd class="kbd">c</kbd>/<kbd class="kbd">l</kbd>/<kbd class="kbd">f</kbd>/<kbd class="kbd">n</kbd>/<kbd class="kbd">d</kbd>. Also <kbd class="kbd">1–5</kbd>, <kbd class="kbd">r</kbd> refresh, <kbd class="kbd">e</kbd> details.
+          </p>
         </div>
       </div>
+      <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/10 to-transparent"></div>
     </header>
 
     <!-- Content -->
@@ -453,7 +503,7 @@ defineExpose({ refreshSite })
             </div>
 
             <ul class="mt-4 space-y-2">
-              <li v-for="ev in items.filter(it => inMonth(it, m))" :key="ev.date" class="group grid grid-cols-[auto,1fr,auto] items-center gap-3 rounded-xl border px-4 py-4 hover:bg-gray-50 focus-within:ring-1 focus-within:ring-gray-200">
+              <li v-for="ev in items.filter(it => inMonth(it, m))" :key="ev.date + '-' + (ev.kind||'m')" class="group grid grid-cols-[auto,1fr,auto] items-center gap-3 rounded-xl border px-4 py-4 hover:bg-gray-50 focus-within:ring-1 focus-within:ring-gray-200">
                 <!-- Date tile -->
                 <div class="h-12 w-12 rounded-lg border bg-white shadow-sm flex flex-col items-center justify-center">
                   <div class="text-sm font-semibold leading-none">{{ dayNum(new Date(ev.date)) }}</div>
@@ -472,13 +522,7 @@ defineExpose({ refreshSite })
                 <!-- Status -->
                 <div class="flex items-center gap-2 col-span-3">
                   <span :class="statusClass(ev.status)">{{ ev.status || 'To-Do' }}</span>
-                  <select
-                    v-if="canManageSite"
-                    :value="ev.status || 'To-Do'"
-                    @change="setItemStatus(ev, ($event.target as HTMLSelectElement).value as MaintStatus)"
-                    class="rounded-md border px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10"
-                    title="Update status"
-                  >
+                  <select v-if="canManageSite" :value="ev.status || 'To-Do'" @change="setItemStatus(ev, ($event.target as HTMLSelectElement).value as MaintStatus)" class="rounded-md border px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10" title="Update status">
                     <option v-for="s in STATUS_LIST" :key="s" :value="s">{{ s }}</option>
                   </select>
                 </div>
@@ -494,7 +538,6 @@ defineExpose({ refreshSite })
       <div v-show="tab==='changelog'" class="space-y-3">
         <h2 class="text-lg font-semibold tracking-tight">Changelog</h2>
         <div class="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
-          <!-- filters -->
           <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div class="md:col-span-1">
               <label class="label">Environment</label>
@@ -644,9 +687,7 @@ defineExpose({ refreshSite })
                 </table>
               </div>
 
-              <p class="text-xs text-gray-500 mt-2">
-                PHP {{ log.run?.php_version }} • WP {{ log.run?.wp_version }} • GF {{ log.run?.gf_version }}
-              </p>
+              <p class="text-xs text-gray-500 mt-2">PHP {{ log.run?.php_version }} • WP {{ log.run?.wp_version }} • GF {{ log.run?.gf_version }}</p>
             </div>
 
             <div class="flex justify-center">
@@ -668,23 +709,17 @@ defineExpose({ refreshSite })
           </div>
           <textarea v-model="noteForm.body" rows="4" placeholder="Write a note…" class="input w-full"></textarea>
           <div class="flex gap-3">
-            <button @click="addNote" :disabled="noteSaving" class="btn-primary">
-              {{ noteSaving ? 'Saving…' : 'Add note' }}
-            </button>
+            <button @click="addNote" :disabled="noteSaving" class="btn-primary">{{ noteSaving ? 'Saving…' : 'Add note' }}</button>
             <button @click="loadNotes" class="btn">Refresh</button>
           </div>
         </div>
-        <div v-else class="rounded-2xl border bg-white p-5 text-sm text-gray-500 shadow-sm">
-          Sign in to add and manage notes.
-        </div>
+        <div v-else class="rounded-2xl border bg-white p-5 text-sm text-gray-500 shadow-sm">Sign in to add and manage notes.</div>
 
         <div class="space-y-3">
           <div v-if="!notes?.items" class="flex justify-center">
             <button @click="loadNotes" class="btn">Load notes</button>
           </div>
-          <div v-else-if="notes.items.length === 0" class="empty">
-            No notes yet.
-          </div>
+          <div v-else-if="notes.items.length === 0" class="empty">No notes yet.</div>
 
           <div v-else v-for="n in notes.items" :key="n._id" class="card">
             <div class="flex items-start justify-between gap-3">
@@ -694,9 +729,7 @@ defineExpose({ refreshSite })
                   <span v-if="n.pinned" class="pill pill-amber">Pinned</span>
                 </div>
                 <p class="whitespace-pre-wrap text-sm mt-1">{{ n.body }}</p>
-                <p class="text-xs text-gray-500 mt-2">
-                  by {{ n.author?.name || n.author?.email }} • {{ new Date(n.updatedAt).toLocaleString() }}
-                </p>
+                <p class="text-xs text-gray-500 mt-2">by {{ n.author?.name || n.author?.email }} • {{ new Date(n.updatedAt).toLocaleString() }}</p>
               </div>
               <div v-if="canEditNote(n)" class="shrink-0 flex gap-2">
                 <button @click="saveNote(n, { pinned: !n.pinned })" class="link text-xs">{{ n.pinned ? 'Unpin' : 'Pin' }}</button>
@@ -770,20 +803,8 @@ defineExpose({ refreshSite })
 
           <!-- Actions -->
           <div class="flex flex-wrap items-center gap-3">
-            <button v-if="canManageSite" @click="saveDetails" :disabled="detSaving" class="btn-primary">
-              {{ detSaving ? 'Saving…' : 'Save details' }}
-            </button>
-
-            <button
-              v-if="canManageSite"
-              @click="async () => { await deleteSite() }"
-              :disabled="deleting"
-              class="btn-danger"
-              title="Permanently delete this site and its maintenance"
-            >
-              {{ deleting ? 'Deleting…' : 'Delete site' }}
-            </button>
-
+            <button v-if="canManageSite" @click="saveDetails" :disabled="detSaving" class="btn-primary">{{ detSaving ? 'Saving…' : 'Save details' }}</button>
+            <button v-if="canManageSite" @click="async () => { await deleteSite() }" :disabled="deleting" class="btn-danger" title="Permanently delete this site and its maintenance">{{ deleting ? 'Deleting…' : 'Delete site' }}</button>
             <p v-if="detMsg" class="text-sm text-emerald-700">{{ detMsg }}</p>
             <p v-if="detErr" class="text-sm text-rose-600">{{ detErr }}</p>
             <p v-if="delMsg" class="text-sm text-emerald-700">{{ delMsg }}</p>
@@ -802,19 +823,9 @@ defineExpose({ refreshSite })
                 <label class="label">Forward months</label>
                 <input v-model.number="rb.forwardMonths" type="number" min="0" max="60" class="input w-28" :disabled="!canManageSite || rebuilding" />
               </div>
-              <button
-                v-if="canManageSite"
-                @click="rebuildMaintenance"
-                :disabled="rebuilding"
-                class="ml-auto btn-danger"
-                title="Deletes and regenerates cadence + report entries"
-              >
-                {{ rebuilding ? 'Rebuilding…' : 'Rebuild maintenance' }}
-              </button>
+              <button v-if="canManageSite" @click="rebuildMaintenance" :disabled="rebuilding" class="ml-auto btn-danger" title="Deletes and regenerates cadence + report entries">{{ rebuilding ? 'Rebuilding…' : 'Rebuild maintenance' }}</button>
             </div>
-            <p class="mt-2 text-xs text-gray-600">
-              Rebuild deletes existing entries for this site/env and recreates: 2-month cadence anchored at Pre-renewal (R−2), Report (R−1), and marks Mid-year (pre+6).
-            </p>
+            <p class="mt-2 text-xs text-gray-600">Rebuild deletes existing entries for this site/env and recreates: 2-month cadence anchored at Pre-renewal (R−2), Report (R−1), and marks Mid-year (pre+6).</p>
             <p v-if="rbMsg" class="mt-2 text-sm text-emerald-700">{{ rbMsg }}</p>
             <p v-if="rbErr" class="mt-2 text-sm text-rose-600">{{ rbErr }}</p>
           </div>

@@ -1,30 +1,50 @@
-// server/api/form-logs.get.ts
-import { defineEventHandler, getQuery } from 'h3'
-import { getDb } from '../utils/mongo'
+import { z } from 'zod'
+
+const qSchema = z.object({
+  site: z.string().min(1),
+  env: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(20),
+  email: z.string().email().optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+})
 
 export default defineEventHandler(async (event) => {
-  const q = getQuery(event)
-  const site  = (q.site as string) || ''
-  const env   = (q.env  as string) || ''
-  const email = ((q.email as string) || '').trim()
-  const limit = Math.min(parseInt((q.limit as string) || '50', 10), 200)
-  const from  = q.from ? new Date(String(q.from)) : null
-  const to    = q.to   ? new Date(String(q.to))   : null
+  const q = qSchema.parse(getQuery(event))
+  const storage = useStorage('data:submissions')
+  const keys = await storage.getKeys()
+  const out: any[] = []
 
-  const filter: any = {}
-  if (site) filter['site.id'] = site
-  if (env)  filter['site.env'] = env
-  if (email) filter['entry.email'] = { $regex: email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
-  if (from || to) {
-    filter.receivedAt = {}
-    if (from) filter.receivedAt.$gte = from
-    if (to)   filter.receivedAt.$lte = to
+  for (const k of keys) {
+    if (!k.endsWith('.json')) continue
+    const rec = await storage.getItem<any>(k).catch(() => null)
+    if (!rec || rec._kind !== 'gf_submission') continue
+
+    // Filter by site/env
+    if (!rec.site || String(rec.site.id) !== q.site) continue
+    if (q.env && String(rec.site.env) !== String(q.env)) continue
+
+    // Filter by email
+    if (q.email && String(rec.entry?.email || '').toLowerCase() !== q.email.toLowerCase()) continue
+
+    // Filter by date window (use entry.created_at or receivedAt)
+    const ts = new Date(rec.entry?.created_at || rec.receivedAt).getTime()
+    if (q.from && ts < new Date(q.from).getTime()) continue
+    if (q.to && ts > new Date(q.to).getTime()) continue
+
+    // Shape to your FormLog interface
+    out.push({
+      _id: k,
+      site: rec.site,
+      form: rec.form,
+      entry: rec.entry,
+      fields: rec.fieldsMap, // label → value (string)
+      run: rec.run,
+      receivedAt: rec.receivedAt,
+    })
   }
 
-  const db = await getDb()
-  const items = await db.collection('form_logs')
-    .find(filter, { sort: { receivedAt: -1, 'entry.created_at': -1 }, limit })
-    .toArray()
-
-  return { items }
+  // Sort newest first, limit
+  out.sort((a,b) => new Date(b.entry?.created_at || b.receivedAt).getTime() - new Date(a.entry?.created_at || a.receivedAt).getTime())
+  return { items: out.slice(0, q.limit) }
 })
