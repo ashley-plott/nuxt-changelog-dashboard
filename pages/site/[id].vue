@@ -311,6 +311,45 @@ function handleKeydown(e: KeyboardEvent){
   }
 }
 
+// inside <script setup> of pages/site/[id].vue
+const latestCi = ref<any>(null)
+const repoSlug = computed(() => {
+  const url = displayGitUrl.value || ''
+  if (!url) return ''
+  try {
+    // https://github.com/owner/repo(.git)
+    return new URL(url).pathname.replace(/^\//, '').replace(/\.git$/, '')
+  } catch {
+    // git@github.com:owner/repo(.git)
+    const m = url.match(/github\.com[:/](.+?)(?:\.git)?$/i)
+    return m ? m[1] : ''
+  }
+})
+
+watchEffect(async () => {
+  if (!repoSlug.value) return
+  latestCi.value = await $fetch('/api/ci/latest', {
+    query: { repo: repoSlug.value, env: site.value?.env || 'production' }
+  }).catch(() => null)
+})
+
+function ciBadgeClass(status?: string) {
+  switch (status) {
+    case 'success': return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    case 'failure': return 'bg-rose-50 text-rose-700 border-rose-200'
+    case 'cancelled': return 'bg-gray-50 text-gray-600 border-gray-200'
+    default: return 'bg-amber-50 text-amber-800 border-amber-200'
+  }
+}
+
+watch([repoSlug, () => site.value?.env], async ([slug, env]) => {
+  if (!slug) { latestCi.value = null; return }
+  latestCi.value = await $fetch('/api/ci/latest', {
+    query: { repo: slug, env: env || 'production' }
+  }).catch(() => null)
+}, { immediate: true })
+
+
 onMounted(() => { window.addEventListener('keydown', handleKeydown) })
 onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown) })
 
@@ -364,6 +403,12 @@ defineExpose({ refreshSite })
             <NuxtLink to="/dashboard" class="inline-flex items-center rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">← Back</NuxtLink>
             <a v-if="displayWebsiteUrl" :href="displayWebsiteUrl" target="_blank" class="inline-flex items-center rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">Open site</a>
             <a v-if="displayGitUrl" :href="displayGitUrl" target="_blank" class="inline-flex items-center rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10">Open repo</a>
+            <a v-if="latestCi?.run?.ci_url"
+              :href="latestCi.run.ci_url"
+              target="_blank"
+              :class="['inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs', ciBadgeClass(latestCi.status)]">
+              CI: {{ latestCi.status }}
+            </a>
           </div>
         </div>
 

@@ -22,6 +22,7 @@ export default defineNuxtConfig({
     POSTMARK_MESSAGE_STREAM: process.env.POSTMARK_MESSAGE_STREAM || 'outbound',
     MAIL_FROM: process.env.MAIL_FROM,
     MAIL_TO_DEFAULT: process.env.MAIL_TO_DEFAULT,
+    ciWebhookToken: process.env.CI_WEBHOOK_TOKEN,
   },
   devtools: { enabled: true }
 })
