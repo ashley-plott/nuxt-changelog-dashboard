@@ -30,13 +30,25 @@ interface ChangelogEntry {
   site?: { id: string; env: string }
   run?: { timestamp?: string; git_branch?: string; git_sha?: string; ci_url?: string }
   receivedAt?: string
-  summary?: { updated_count?: number; added_count?: number; removed_count?: number; has_changes?: boolean }
+  summary?: {
+    total_plugins?: number
+    updated_count?: number
+    added_count?: number
+    removed_count?: number
+    unchanged_count?: number
+    initial_snapshot?: boolean
+    has_changes?: boolean
+  }
   changes?: {
     updated?: Array<{ name: string; old: string; new: string }>
     added?: Array<{ name: string; new: string }>
     removed?: Array<{ name: string; old: string }>
+    unchanged?: Array<{ name: string; version: string }>
   }
+  // Flat list of all plugins for this run (from the new backend payload)
+  plugins?: Array<{ name: string; old?: string|null; new?: string|null; status: 'updated'|'added'|'removed'|'unchanged'|'current' }>
 }
+
 interface FormLog {
   _id?: string
   site?: { id: string; env: string }
@@ -604,38 +616,77 @@ defineExpose({ refreshSite })
                   <span class="pill pill-blue">Updated: {{ entry.summary?.updated_count || 0 }}</span>
                   <span class="pill pill-emerald">Added: {{ entry.summary?.added_count || 0 }}</span>
                   <span class="pill pill-rose">Removed: {{ entry.summary?.removed_count || 0 }}</span>
+                  <span class="pill pill-gray">Unchanged: {{ entry.summary?.unchanged_count || 0 }}</span>
+                  <span v-if="entry.summary?.total_plugins" class="pill pill-gray">Total: {{ entry.summary?.total_plugins }}</span>
                 </div>
               </div>
 
-              <div v-if="entry.summary?.has_changes" class="mt-3 overflow-hidden rounded-lg ring-1 ring-gray-200">
-                <table class="min-w-full text-sm">
-                  <thead class="bg-gray-50">
-                    <tr class="text-left">
-                      <th class="th">Package</th>
-                      <th class="th">Old</th>
-                      <th class="th">New</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y">
-                    <tr v-for="p in entry.changes?.updated || []" :key="'u-'+p.name">
-                      <td class="td font-medium">{{ p.name }}</td>
-                      <td class="td"><code>{{ p.old }}</code></td>
-                      <td class="td"><code>{{ p.new }}</code></td>
-                    </tr>
-                    <tr v-for="p in entry.changes?.added || []" :key="'a-'+p.name">
-                      <td class="td font-medium text-emerald-700">{{ p.name }}</td>
-                      <td class="td"><em>—</em></td>
-                      <td class="td"><code>{{ p.new }}</code></td>
-                    </tr>
-                    <tr v-for="p in entry.changes?.removed || []" :key="'r-'+p.name">
-                      <td class="td font-medium text-rose-700">{{ p.name }}</td>
-                      <td class="td"><code>{{ p.old }}</code></td>
-                      <td class="td"><em>—</em></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div v-else class="mt-3 text-sm text-gray-500">No dependency changes.</div>
+              <div class="mt-3 overflow-hidden rounded-lg ring-1 ring-gray-200">
+  <table class="min-w-full text-sm">
+    <thead class="bg-gray-50">
+      <tr class="text-left">
+        <th class="th">Package</th>
+        <th class="th">Old</th>
+        <th class="th">New</th>
+        <th class="th">Status</th>
+      </tr>
+    </thead>
+
+    <!-- Prefer flattened snapshot if present -->
+    <tbody v-if="(entry.plugins && entry.plugins.length) || (!entry.summary?.has_changes)" class="divide-y">
+      <tr v-for="p in (entry.plugins || [])" :key="'all-'+p.name">
+        <td class="td font-medium">{{ p.name }}</td>
+        <td class="td"><code>{{ p.old ?? (p.status==='added'||p.status==='current' ? '—' : '') }}</code></td>
+        <td class="td"><code>{{ p.new ?? (p.status==='removed' ? '—' : '') }}</code></td>
+        <td class="td">
+          <span
+            class="pill"
+            :class="{
+              'pill-blue': p.status==='updated',
+              'pill-emerald': p.status==='added' || p.status==='current',
+              'pill-rose': p.status==='removed',
+              'pill-gray': p.status==='unchanged'
+            }"
+          >{{ p.status }}</span>
+        </td>
+      </tr>
+
+      <!-- If plugins[] is missing (older entries) but there are no changes, show a friendly row -->
+      <tr v-if="!entry.plugins || entry.plugins.length===0">
+        <td class="td" colspan="4"><em>No dependency changes. (Snapshot not available for this run.)</em></td>
+      </tr>
+    </tbody>
+
+    <!-- Fallback to legacy changes arrays (+ unchanged) -->
+    <tbody v-else class="divide-y">
+      <tr v-for="p in entry.changes?.updated || []" :key="'u-'+p.name">
+        <td class="td font-medium">{{ p.name }}</td>
+        <td class="td"><code>{{ p.old }}</code></td>
+        <td class="td"><code>{{ p.new }}</code></td>
+        <td class="td"><span class="pill pill-blue">updated</span></td>
+      </tr>
+      <tr v-for="p in entry.changes?.added || []" :key="'a-'+p.name">
+        <td class="td font-medium text-emerald-700">{{ p.name }}</td>
+        <td class="td"><em>—</em></td>
+        <td class="td"><code>{{ p.new }}</code></td>
+        <td class="td"><span class="pill pill-emerald">added</span></td>
+      </tr>
+      <tr v-for="p in entry.changes?.removed || []" :key="'r-'+p.name">
+        <td class="td font-medium text-rose-700">{{ p.name }}</td>
+        <td class="td"><code>{{ p.old }}</code></td>
+        <td class="td"><em>—</em></td>
+        <td class="td"><span class="pill pill-rose">removed</span></td>
+      </tr>
+      <tr v-for="p in entry.changes?.unchanged || []" :key="'n-'+p.name">
+        <td class="td font-medium text-gray-700">{{ p.name }}</td>
+        <td class="td"><code>{{ p.version }}</code></td>
+        <td class="td"><code>{{ p.version }}</code></td>
+        <td class="td"><span class="pill pill-gray">unchanged</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
 
               <div class="mt-2">
                 <a v-if="entry.run?.ci_url" :href="entry.run.ci_url" target="_blank" class="link">CI build</a>
@@ -877,6 +928,8 @@ defineExpose({ refreshSite })
 .pill-rose { @apply bg-rose-50 text-rose-700 border border-rose-100; }
 .pill-purple { @apply bg-purple-50 text-purple-700 border border-purple-100; }
 .pill-amber { @apply bg-amber-50 text-amber-800 border border-amber-100; }
+.pill-gray { @apply bg-gray-50 text-gray-700 border border-gray-200; }
+
 
 .chip { @apply px-2 py-0.5 rounded-full border; }
 .chip-violet { @apply bg-violet-50 text-violet-700 border-violet-100; }
@@ -884,4 +937,5 @@ defineExpose({ refreshSite })
 .chip-blue { @apply bg-blue-50 text-blue-800 border-blue-100; }
 
 .kbd { @apply px-1.5 py-0.5 border rounded text-[11px] bg-white shadow-sm; }
+
 </style>
