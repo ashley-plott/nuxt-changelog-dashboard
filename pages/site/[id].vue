@@ -172,15 +172,39 @@ async function loadNotes(){
 }
 const noteForm = reactive({ title: '', body: '', pinned: false })
 const noteSaving = ref(false)
+
+function extractFetchError(e:any){
+  if (!e) return 'Unknown error'
+  const status = e.statusCode ?? e.response?.status ?? 'ERR'
+  const label  = e.statusMessage ?? e.name ?? 'Error'
+  const msg =
+    (e.data && (e.data.message || e.data.error || e.data)) ||
+    e.message ||
+    String(e)
+  return `[${status}] ${label}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`
+}
+
 async function addNote(){
   if (!authed) return
   noteSaving.value = true
   try {
-    await $fetch(`/api/sites/${id}/notes`, { method: 'POST', body: { ...noteForm, env: site.value?.env }, headers })
+    await $fetch(`/api/sites/${id}/notes`, {
+      method: 'POST',
+      body: { ...noteForm, env: site.value?.env },
+      headers
+    })
     noteForm.title = ''; noteForm.body = ''; noteForm.pinned = false
     await loadNotes()
-  } finally { noteSaving.value = false }
+  } catch (err:any) {
+    const msg = extractFetchError(err)
+    console.error('addNote failed:', err)
+    alert(msg) // or your toast
+  } finally {
+    noteSaving.value = false
+  }
 }
+
+
 function canEditNote(n:any){ if (!authed) return false; return my.role==='admin'||my.role==='manager'||String(n.author?.id)===String(my.id) }
 async function saveNote(n:any, patch:any){ await $fetch(`/api/sites/${id}/notes/${n._id}`, { method:'PATCH', body:patch, headers }); await loadNotes() }
 async function delNote(n:any){ if (!confirm('Delete this note?')) return; await $fetch(`/api/sites/${id}/notes/${n._id}`, { method:'DELETE', headers }); await loadNotes() }
