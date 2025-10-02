@@ -3,8 +3,6 @@
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch, watchEffect, defineComponent, h } from 'vue'
 import { useRoute, useRouter, useFetch, useAsyncData, useRequestHeaders } from '#imports'
 
-definePageMeta({ middleware: 'auth' }) // protect page
-
 type TabKey = 'calendar' | 'changelog' | 'forms' | 'notes' | 'details'
 
 type MaintStatus =

@@ -1,6 +1,5 @@
 
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth' })
 const me = await $fetch('/api/auth/me')
 const name = ref(me?.user?.name || '')
 const email = me?.user?.email

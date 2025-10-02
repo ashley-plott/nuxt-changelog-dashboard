@@ -1,6 +1,16 @@
-// middleware/auth.ts
-export default defineNuxtRouteMiddleware(async () => {
-  const headers = process.server ? useRequestHeaders(['cookie']) : undefined
-  const me = await $fetch('/api/auth/me', { headers }).catch(() => ({ authenticated: false }))
-  if (!me?.authenticated) return navigateTo('/login')
+// Protects private pages. Use on pages like:
+// definePageMeta({ middleware: 'auth' })
+
+export default defineNuxtRouteMiddleware(async (to) => {
+  const { ensure } = useAuth()
+  const me = await ensure()
+
+  if (!me?.authenticated) {
+    const redirect = `/login?redirect=${encodeURIComponent(to.fullPath)}`
+    // Use 302 on SSR for proper HTTP redirect headers.
+    if (process.server) {
+      return navigateTo(redirect, { redirectCode: 302 })
+    }
+    return navigateTo(redirect)
+  }
 })

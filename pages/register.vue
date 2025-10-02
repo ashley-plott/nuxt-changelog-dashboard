@@ -1,6 +1,5 @@
 
 <script setup lang="ts">
-definePageMeta({ layout: false })
 const email = ref('')
 const name = ref('')
 const password = ref('')

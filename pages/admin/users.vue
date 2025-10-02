@@ -1,6 +1,5 @@
 
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth' })
 const roles = ['viewer','manager','admin']
 
 const { data, refresh, pending, error } = await useFetch('/api/users')

@@ -1,7 +1,5 @@
 <!-- pages/dashboard.vue (polished layout) -->
 <script setup lang="ts">
-// Keep dashboard behind login
-definePageMeta({ middleware: 'auth' })
 
 // ===== Types =====
 

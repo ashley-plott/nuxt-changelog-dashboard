@@ -5,9 +5,6 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   nitro: {
     preset: 'vercel',
-    externals: {
-      inline:['puppeteer-core', '@sparticuz/chromium'],
-    }
   },
   routeRules: {
     '/api/**': { runtime: 'nodejs' }
