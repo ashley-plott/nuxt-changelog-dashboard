@@ -1,0 +1,24 @@
+/* shared utility classes extracted from <style scoped> */
+* { transition: background-color .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.label { @apply block text-xs font-medium text-gray-600 mb-1; }
+.input { @apply w-full rounded-lg border px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10; }
+.btn { @apply rounded-lg border px-4 py-2 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10; }
+.btn-primary { @apply inline-flex items-center rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20; }
+.btn-danger { @apply inline-flex items-center rounded-lg bg-rose-600 px-4 py-2 text-white hover:bg-rose-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300; }
+.link { @apply text-blue-600 hover:underline underline-offset-2; }
+.card { @apply rounded-xl border bg-white p-4 shadow-sm; }
+.empty { @apply rounded-xl border border-dashed p-6 text-center text-sm text-gray-500 bg-white shadow-sm; }
+.th { @apply py-2 pl-3 pr-4 font-medium text-gray-600; }
+.td { @apply py-2 pl-3 pr-4; }
+.pill { @apply inline-flex items-center rounded-full px-2 py-1 text-xs; }
+.pill-blue { @apply bg-blue-50 text-blue-700 border border-blue-100; }
+.pill-emerald { @apply bg-emerald-50 text-emerald-700 border border-emerald-100; }
+.pill-rose { @apply bg-rose-50 text-rose-700 border border-rose-100; }
+.pill-purple { @apply bg-purple-50 text-purple-700 border border-purple-100; }
+.pill-amber { @apply bg-amber-50 text-amber-800 border-amber-100; }
+.pill-gray { @apply bg-gray-50 text-gray-700 border-gray-200; }
+.chip { @apply px-2 py-0.5 rounded-full border; }
+.chip-violet { @apply bg-violet-50 text-violet-700 border-violet-100; }
+.chip-amber { @apply bg-amber-50 text-amber-800 border-amber-100; }
+.chip-blue { @apply bg-blue-50 text-blue-800 border-blue-100; }
+.kbd { @apply px-1.5 py-0.5 border rounded text-[11px] bg-white shadow-sm; }

@@ -1,7 +1,3 @@
-import { debug } from "console";
-import { title } from "process";
-
-// nuxt.config.ts
 export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   nitro: {
