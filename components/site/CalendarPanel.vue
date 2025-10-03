@@ -503,12 +503,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <!-- Last updated -> Popover trigger -->
               <div
                 class="mt-2 text-[11px] text-gray-700 relative"
-                v-if="latestHistory(ev)"
+                v-if="!displayHistory(ev).length"
                 data-popover-root
               >
                 <button
                   type="button"
-                  class="underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10 rounded-sm"
+                  class="underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10 rounded-sm text-left"
                   @click.stop="togglePop(ev)"
                   :aria-expanded="openPopId === ((ev as any)._id || (ev as any).id || `${ev.date}-${ev.kind || 'm'}`) ? 'true' : 'false'"
                   :aria-controls="`pop-${(ev as any)._id || (ev as any).id || `${ev.date}-${ev.kind || 'm'}`}`"
