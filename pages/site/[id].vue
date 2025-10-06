@@ -30,41 +30,50 @@ const site  = computed(() => data.value?.site)
 const items = computed(() => (data.value?.items || []))
 
 // === User directory (for resolving "by" to a display name) ===
-/** You can change this endpoint to match your API. It should return an array of { id?, name?, email? } */
 const { data: directoryData } = await useFetch<Array<{ id?: string; name?: string; email?: string }>>(
   '/api/users/directory', { headers, key: `users-dir` }
 )
 const userDirectory = computed(() => directoryData.value || [])
 
 // Tabs
+const TABS: { key: TabKey, label: string }[] = [
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'changelog', label: 'Changelog' },
+  { key: 'forms', label: 'Forms' },
+  { key: 'notes', label: 'Notes' },
+  { key: 'details', label: 'Details' },
+]
 const tab = ref<TabKey>('calendar')
+const isMobileNavOpen = ref(false) // State for mobile tab dropdown
+const activeTabLabel = computed(() => TABS.find(t => t.key === tab.value)?.label || 'Navigation')
+function selectTab(newTab: TabKey) {
+  tab.value = newTab
+  isMobileNavOpen.value = false
+}
 
 // ----- DISPLAY HELPERS -----
-const displayWebsiteUrl = computed(() => {
-  const s = site.value as any
-  return (s?.websiteUrl || s?.url || '') as string
-})
+const displayWebsiteUrl = computed(() => (site.value as any)?.websiteUrl || (site.value as any)?.url || '')
 const displayGitUrl = computed(() => site.value?.gitUrl || '')
 const displayContact = computed<PrimaryContact | null>(() => site.value?.primaryContact || null)
-
 const renewMonthName = computed(() => {
   const month = (site.value?.renewMonth || 1) - 1
-  const date = new Date(2000, Math.max(0, Math.min(11, month)), 1)
-  return date.toLocaleString(undefined, { month: 'long' })
+  return new Date(2000, Math.max(0, Math.min(11, month)), 1).toLocaleString(undefined, { month: 'long' })
 })
-
 const canManageSite = computed(() => authed && (my?.role==='admin'||my?.role==='manager'))
-
-// Counts (placeholders for header pills)
 const counts = computed(() => ({
-  calendar: items.value.length,
-  changelog: undefined,
-  forms: undefined,
-  notes: undefined
+  calendar: items.value.length, changelog: undefined, forms: undefined, notes: undefined
 }))
 
-// ===== Keyboard shortcuts =====
+// ===== Interactions & Shortcuts =====
 const chord = reactive({ waiting: false, timer: 0 as any })
+const compact = ref(false)
+
+function closeAllPopovers() { isMobileNavOpen.value = false }
+function onDocClick(e: MouseEvent) {
+  if (!(e.target as HTMLElement).closest('[data-popover-root]')) closeAllPopovers()
+}
+function onDocKey(e: KeyboardEvent) { if (e.key === 'Escape') closeAllPopovers() }
+
 function startChord(){ chord.waiting = true; clearTimeout(chord.timer); chord.timer = setTimeout(() => { chord.waiting = false }, 800) }
 function handleKeydown(e: KeyboardEvent){
   const t = e.target as HTMLElement
@@ -82,10 +91,19 @@ function handleKeydown(e: KeyboardEvent){
     tab.value = map[e.key]; e.preventDefault()
   }
 }
-const compact = ref(false)
 function onScroll () { compact.value = window.scrollY > 16 }
-onMounted(() => { window.addEventListener('keydown', handleKeydown); window.addEventListener('scroll', onScroll, { passive: true }) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown); window.removeEventListener('scroll', onScroll) })
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('scroll', onScroll, { passive: true })
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onDocKey)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('scroll', onScroll)
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onDocKey)
+})
 
 // CI badge
 const latestCi = ref<any>(null)
@@ -98,10 +116,6 @@ const repoSlug = computed(() => {
     return m ? m[1] : ''
   }
 })
-watchEffect(async () => {
-  if (!repoSlug.value) return
-  latestCi.value = await $fetch('/api/ci/latest', { query: { repo: repoSlug.value, env: site.value?.env || 'production' } }).catch(() => null)
-})
 watch([repoSlug, () => site.value?.env], async ([slug, env]) => {
   if (!slug) { latestCi.value = null; return }
   latestCi.value = await $fetch('/api/ci/latest', { query: { repo: slug, env: env || 'production' } }).catch(() => null)
@@ -109,7 +123,7 @@ watch([repoSlug, () => site.value?.env], async ([slug, env]) => {
 
 // ====== Actions passed down ======
 async function setItemStatus(ev: MaintItem, next: MaintStatus) {
-  if (!(my?.role === 'admin' || my?.role === 'manager')) return
+  if (!canManageSite.value) return
   await $fetch('/api/scheduler/maintenance/status', {
     method: 'PATCH',
     body: { siteId: ev.site.id, env: ev.site.env, date: ev.date, status: next },
@@ -117,50 +131,29 @@ async function setItemStatus(ev: MaintItem, next: MaintStatus) {
   }).catch(() => {})
   await refreshSite()
 }
-
-/** optional audit persist; adjust endpoint to your API.
- * The CalendarPanel shows the change immediately (optimistic), we also refresh to pull server history.
- */
-async function recordStatusChange(...args: any[]) {
-  // if first arg is an object with `item`, use it; otherwise treat positional args
-  let payload: any
-  if (args.length === 1 && args[0] && typeof args[0] === 'object') {
-    payload = args[0]
-  } else if (args.length >= 3) {
-    payload = { item: args[0], from: args[1], to: args[2], by: args[3], at: args[4] }
-  }
-
-  if (!payload?.item) return // nothing to do
-
+async function recordStatusChange(payload: any) {
+  if (!payload?.item) return
   try {
     await $fetch('/api/scheduler/maintenance/audit', {
       method: 'POST',
       body: {
-        siteId: payload.item.site.id,
-        env: payload.item.site.env,
-        date: payload.item.date,
-        from: payload.from ?? null,
-        to: payload.to,
-        by: payload.by,
-        at: payload.at || new Date(),
+        siteId: payload.item.site.id, env: payload.item.site.env, date: payload.item.date,
+        from: payload.from ?? null, to: payload.to, by: payload.by, at: payload.at || new Date(),
       },
       headers
     })
   } catch {}
   await refreshSite()
 }
-
-
 function copyToClipboard(text: string){
   try { navigator.clipboard.writeText(text) } catch {}
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-neutral-50">
-    <!-- Sticky Header -->
+  <div class="min-h-screen bg-slate-50">
     <header
-      class="sticky top-0 z-50 border-b border-black/5 bg-white/60 backdrop-blur-xl supports-[backdrop-filter]:bg-white/50"
+      class="sticky top-0 z-50 border-b border-black/5 bg-white/60 backdrop-blur-xl supports-[backdrop-filter]:bg-white/50 transition-all duration-200 pb-8"
       :class="compact ? 'py-2' : 'py-3 sm:py-4'"
     >
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -174,62 +167,65 @@ function copyToClipboard(text: string){
           @copy="copyToClipboard"
         />
 
-        <!-- Tabs -->
         <div class="mt-4">
-          <div class="inline-flex items-center gap-1 rounded-2xl border border-black/5 bg-gray-50/80 p-1 shadow-sm">
-            <TabButton label="Calendar"  :active="tab==='calendar'"  @click="tab='calendar'"  :count="counts.calendar"  icon="M8 7v10m8-10v10M4 5h16M4 19h16"/>
-            <TabButton label="Changelog" :active="tab==='changelog'" @click="tab='changelog'" :count="counts.changelog" icon="M5 12h14M5 6h14M5 18h10"/>
-            <TabButton label="Forms"     :active="tab==='forms'"     @click="tab='forms'"     :count="counts.forms"     icon="M4 7h16M4 12h16M4 17h8"/>
-            <TabButton label="Notes"     :active="tab==='notes'"     @click="tab='notes'"     :count="counts.notes"     icon="M12 20l9-5-9-5-9 5 9 5z"/>
-            <TabButton label="Details"   :active="tab==='details'"   @click="tab='details'"   :count="undefined"        icon="M12 20v-6m0-8v2m0 0a4 4 0 110 8 4 4 0 010-8z"/>
+          <div class="hidden sm:inline-flex items-center gap-1 rounded-2xl border border-black/5 bg-slate-50/80 p-1 shadow-sm">
+            <TabButton label="Calendar"  :active="tab==='calendar'"  @click="selectTab('calendar')"  :count="counts.calendar"  icon="M8 7v10m8-10v10M4 5h16M4 19h16"/>
+            <TabButton label="Changelog" :active="tab==='changelog'" @click="selectTab('changelog')" :count="counts.changelog" icon="M5 12h14M5 6h14M5 18h10"/>
+            <TabButton label="Forms"     :active="tab==='forms'"     @click="selectTab('forms')"     :count="counts.forms"     icon="M4 7h16M4 12h16M4 17h8"/>
+            <TabButton label="Notes"     :active="tab==='notes'"     @click="selectTab('notes')"     :count="counts.notes"     icon="M12 20l9-5-9-5-9 5 9 5z"/>
+            <TabButton label="Details"   :active="tab==='details'"   @click="selectTab('details')"   :count="undefined"        icon="M12 20v-6m0-8v2m0 0a4 4 0 110 8 4 4 0 010-8z"/>
           </div>
-          <p class="text-[11px] text-gray-500 mt-1">
-            Shortcuts: <kbd class="kbd">g</kbd> then <kbd class="kbd">c</kbd>/<kbd class="kbd">l</kbd>/<kbd class="kbd">f</kbd>/<kbd class="kbd">n</kbd>/<kbd class="kbd">d</kbd>. Also <kbd class="kbd">1–5</kbd>, <kbd class="kbd">r</kbd> refresh, <kbd class="kbd">e</kbd> details.
-          </p>
+
+          <div class="sm:hidden relative" data-popover-root>
+            <button @click="isMobileNavOpen = !isMobileNavOpen" class="mobile-tab-dropdown-btn">
+              <span>{{ activeTabLabel }}</span>
+              <svg class="h-5 w-5 text-slate-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06z" clip-rule="evenodd" /></svg>
+            </button>
+            <Transition enter-active-class="transition ease-out duration-100" enter-from-class="transform opacity-0 scale-95" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-75" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
+              <div v-if="isMobileNavOpen" class="absolute left-0 mt-2 w-56 origin-top-left rounded-md bg-white shadow-lg ring-1 ring-black/5 focus:outline-none z-10">
+                <div class="py-1">
+                  <button v-for="t in TABS" :key="t.key" @click="selectTab(t.key)" class="mobile-tab-item" :class="{'bg-slate-100 text-slate-900': tab === t.key}">
+                    {{ t.label }}
+                  </button>
+                </div>
+              </div>
+            </Transition>
+          </div>
         </div>
       </div>
       <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/10 to-transparent"></div>
     </header>
 
-    <!-- Content -->
-    <div class="max-w-7xl mx-auto p-4 sm:p-6 space-y-6 md:space-y-8">
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:px-8 space-y-6 md:space-y-8">
       <div v-if="pending" class="rounded-2xl border bg-white p-6 shadow-sm">
         <div class="animate-pulse space-y-3">
-          <div class="h-4 w-40 bg-gray-200 rounded"></div>
+          <div class="h-4 w-40 bg-slate-200 rounded"></div>
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            <div v-for="i in 6" :key="i" class="h-40 rounded-2xl border bg-gray-50"></div>
+            <div v-for="i in 6" :key="i" class="h-40 rounded-2xl border bg-slate-100"></div>
           </div>
         </div>
       </div>
       <div v-else-if="error" class="rounded-2xl border bg-white p-8 text-center text-sm text-red-600 shadow-sm">Failed to load site.</div>
 
-      <!-- CALENDAR -->
-      <CalendarPanel
-        v-show="tab==='calendar'"
-        :items="items"
-        :can-manage-site="canManageSite"
-        :current-user="{ id: my?.id, name: my?.name, email: my?.email }"
-        :user-directory="userDirectory"
-        :months-ahead="36"
-        :months-behind="36"
-        @set-status="setItemStatus"
-        @status-change="recordStatusChange"
-      />
-
+      <CalendarPanel v-show="tab==='calendar'" :items="items" :can-manage-site="canManageSite" :current-user="my ? { id: my.id, name: my.name, email: my.email } : undefined" :user-directory="userDirectory" :months-ahead="36" :months-behind="36" @set-status="setItemStatus" @status-change="recordStatusChange" />
       <ChangelogPanel v-show="tab==='changelog'" :site-id="id" :env="site?.env || ''" />
-
       <FormsPanel v-show="tab==='forms'" :site-id="id" :env="site?.env || ''" />
-
       <NotesPanel v-show="tab==='notes'" :site-id="id" :env="site?.env" :authed="authed" :my="my" />
-
-      <DetailsPanel
-        v-show="tab==='details'"
-        :id="id"
-        :site="site"
-        :can-manage-site="canManageSite"
-        @saved="refreshSite"
-        @deleted="(to)=>router.push(to)"
-      />
+      <DetailsPanel v-show="tab==='details'" :id="id" :site="site" :can-manage-site="canManageSite" @saved="refreshSite" @deleted="(to)=>router.push(to)" />
     </div>
   </div>
 </template>
+
+<style scoped>
+.kbd {
+  @apply inline-block rounded border border-slate-300 bg-slate-200/50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600;
+}
+.mobile-tab-dropdown-btn {
+  @apply inline-flex items-center justify-between w-full rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-800
+         shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 transition-colors;
+}
+.mobile-tab-item {
+  @apply block w-full px-4 py-2 text-left text-sm text-slate-700
+         hover:bg-slate-100 hover:text-slate-900;
+}
+</style>
