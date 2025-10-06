@@ -121,13 +121,17 @@ async function setItemStatus(ev: MaintItem, next: MaintStatus) {
 /** optional audit persist; adjust endpoint to your API.
  * The CalendarPanel shows the change immediately (optimistic), we also refresh to pull server history.
  */
-async function recordStatusChange(payload: {
-  item: MaintItem
-  from?: MaintStatus | null
-  to: MaintStatus
-  by?: { id?: string; name?: string; email?: string }
-  at: Date
-}) {
+async function recordStatusChange(...args: any[]) {
+  // if first arg is an object with `item`, use it; otherwise treat positional args
+  let payload: any
+  if (args.length === 1 && args[0] && typeof args[0] === 'object') {
+    payload = args[0]
+  } else if (args.length >= 3) {
+    payload = { item: args[0], from: args[1], to: args[2], by: args[3], at: args[4] }
+  }
+
+  if (!payload?.item) return // nothing to do
+
   try {
     await $fetch('/api/scheduler/maintenance/audit', {
       method: 'POST',
@@ -138,13 +142,14 @@ async function recordStatusChange(payload: {
         from: payload.from ?? null,
         to: payload.to,
         by: payload.by,
-        at: payload.at,
+        at: payload.at || new Date(),
       },
       headers
     })
-  } catch {/* non-blocking */}
+  } catch {}
   await refreshSite()
 }
+
 
 function copyToClipboard(text: string){
   try { navigator.clipboard.writeText(text) } catch {}
