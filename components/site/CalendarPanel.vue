@@ -1,6 +1,10 @@
 <script setup lang="ts">
 // SCRIPT LOGIC IS LARGELY THE SAME, WITH 'q' (search) REMOVED
 // AND STATE ADDED FOR THE NEW ACTION MENU
+import { EllipsisVerticalIcon } from '@heroicons/vue/20/solid'
+import { ArrowPathIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon } from '@heroicons/vue/20/solid'
+import { ArrowLeftIcon } from '@heroicons/vue/20/solid'
+import { CalendarIcon } from '@heroicons/vue/24/outline'
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import type { MaintItem, MaintStatus, SiteDoc } from '~/composables/site'
 import {
@@ -283,17 +287,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <div class="flex items-center gap-2">
         <div class="flex items-center rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
           <button @click="prevYear" :disabled="years.indexOf(selectedYear) <= 0" class="year-pager-btn rounded-l-md" aria-label="Previous year">
-            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
+            <ChevronLeftIcon class="w-4 h-4" />
           </button>
           <select v-model="selectedYear" class="year-select" aria-label="Select year">
             <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
           </select>
           <button @click="nextYear" :disabled="years.indexOf(selectedYear) >= years.length - 1" class="year-pager-btn rounded-r-md" aria-label="Next year">
-            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" /></svg>
+            <ChevronRightIcon class="w-4 h-4" />
           </button>
         </div>
         <button @click="emit('refresh')" class="btn-primary" :aria-busy="!!isLoading" title="Refresh (r)">
-          <svg viewBox="0 0 24 24" class="h-5 w-5" :class="{'animate-spin': isLoading}" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 10-3.5 7.1M21 12V6m0 6h-6"/></svg>
+          <ArrowPathIcon class="w-5 h-5" :class="{'animate-spin' : isLoading}" />
           <span>{{ isLoading ? 'Refreshing' : 'Refresh' }}</span>
         </button>
       </div>
@@ -346,7 +350,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <div class="flex items-center justify-between text-sm">
               <div v-if="latestHistory(ev)" class="relative text-slate-600" data-popover-root>
                 <button type="button" @click.stop="togglePop(ev)" class="flex items-center gap-1.5 hover:text-slate-900 transition-colors" :aria-expanded="openPopId === itemKey(ev)" :aria-controls="`pop-${itemKey(ev)}`">
-                  <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6.25.75a.75.75 0 0 0 0 1.5h.5a.75.75 0 0 0 0-1.5h-.5ZM8 4a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 8 4Z" clip-rule="evenodd" /></svg>
+                  <ClockIcon class="w-5 h-5" />
                   <span>{{ byLabel(latestHistory(ev)!.by) }}</span>
                 </button>
                 <div v-if="openPopId === itemKey(ev)" :id="`pop-${itemKey(ev)}`" role="dialog" aria-label="Status change history" class="popover">
@@ -367,7 +371,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 <span :class="statusClass(ev.status)">{{ ev.status || 'To-Do' }}</span>
                 <div v-if="canManageSite" class="relative" data-action-menu-root>
                   <button @click="toggleActionMenu(ev)" type="button" class="action-menu-btn" aria-label="Update status">
-                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 8.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM11.5 15.5a1.5 1.5 0 10-3 0 1.5 1.5 0 003 0z" /></svg>
+                    <EllipsisVerticalIcon class="w-5 h-5" />
                   </button>
                   <div v-if="openActionMenuId === itemKey(ev)" class="action-menu">
                     <div class="py-1">
@@ -381,7 +385,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </ul>
         
         <div v-else class="text-center py-8 px-4 rounded-lg bg-slate-50">
-          <svg class="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
           <h4 class="mt-2 text-sm font-semibold text-slate-800">{{ isLoading ? 'Loading Events...' : 'No Events Scheduled' }}</h4>
           <p class="mt-1 text-sm text-slate-500">{{ isLoading ? 'Please wait a moment.' : 'This month is clear.' }}</p>
         </div>

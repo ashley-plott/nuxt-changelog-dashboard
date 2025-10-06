@@ -12,6 +12,8 @@ import NotesPanel from '~/components/site/NotesPanel.vue'
 import DetailsPanel from '~/components/site/DetailsPanel.vue'
 import '~/assets/site.css'
 
+import { CalendarIcon, DocumentTextIcon, ClipboardDocumentListIcon, PencilSquareIcon, InformationCircleIcon } from '@heroicons/vue/20/solid'
+
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id as string
@@ -168,13 +170,13 @@ function copyToClipboard(text: string){
         />
 
         <div class="mt-4">
-          <div class="hidden sm:inline-flex items-center gap-1 rounded-2xl border border-black/5 bg-slate-50/80 p-1 shadow-sm">
-            <TabButton label="Calendar"  :active="tab==='calendar'"  @click="selectTab('calendar')"  :count="counts.calendar"  icon="M8 7v10m8-10v10M4 5h16M4 19h16"/>
-            <TabButton label="Changelog" :active="tab==='changelog'" @click="selectTab('changelog')" :count="counts.changelog" icon="M5 12h14M5 6h14M5 18h10"/>
-            <TabButton label="Forms"     :active="tab==='forms'"     @click="selectTab('forms')"     :count="counts.forms"     icon="M4 7h16M4 12h16M4 17h8"/>
-            <TabButton label="Notes"     :active="tab==='notes'"     @click="selectTab('notes')"     :count="counts.notes"     icon="M12 20l9-5-9-5-9 5 9 5z"/>
-            <TabButton label="Details"   :active="tab==='details'"   @click="selectTab('details')"   :count="undefined"        icon="M12 20v-6m0-8v2m0 0a4 4 0 110 8 4 4 0 010-8z"/>
-          </div>
+            <div class="hidden sm:inline-flex items-center gap-1 rounded-2xl border border-black/5 bg-slate-50/80 p-1 shadow-sm">
+              <TabButton label="Calendar"  :active="tab==='calendar'"  @click="selectTab('calendar')"  :count="counts.calendar"  :icon="CalendarIcon"/>
+              <TabButton label="Changelog" :active="tab==='changelog'" @click="selectTab('changelog')" :count="counts.changelog" :icon="DocumentTextIcon"/>
+              <TabButton label="Forms"     :active="tab==='forms'"     @click="selectTab('forms')"     :count="counts.forms"     :icon="ClipboardDocumentListIcon"/>
+              <TabButton label="Notes"     :active="tab==='notes'"     @click="selectTab('notes')"     :count="counts.notes"     :icon="PencilSquareIcon"/>
+              <TabButton label="Details"   :active="tab==='details'"   @click="selectTab('details')"   :icon="InformationCircleIcon"/>
+            </div>
 
           <div class="sm:hidden relative" data-popover-root>
             <button @click="isMobileNavOpen = !isMobileNavOpen" class="mobile-tab-dropdown-btn">

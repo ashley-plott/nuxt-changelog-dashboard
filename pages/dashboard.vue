@@ -2,6 +2,10 @@
 // SCRIPT LOGIC REMAINS THE SAME, AS REQUESTED
 import { reactive, computed, ref } from 'vue'
 import { useFetch } from '#imports'
+import { ArrowPathIcon, CalendarDaysIcon, GlobeEuropeAfricaIcon } from '@heroicons/vue/24/outline';
+import { ChartBarIcon } from '@heroicons/vue/24/outline';
+import { GlobeAltIcon } from '@heroicons/vue/24/solid';
+import { ArrowRightIcon } from '@heroicons/vue/24/outline';
 
 type MaintStatus = 'To-Do' | 'In Progress' | 'Awaiting Form Conf' | 'Chased Via Email' | 'Chased Via Phone' | 'Completed'
 interface OverviewMaintItem {
@@ -142,7 +146,7 @@ const envBadge = (env?: string) => {
           </div>
           <div class="flex items-center gap-2 flex-shrink-0">
             <button @click="refresh" class="btn-secondary" :disabled="pending">
-              <svg class="h-5 w-5" :class="{'animate-spin': pending}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.312 11.342a1.25 1.25 0 1 1-2.324-1.122A5.002 5.002 0 0 0 10 5a5 5 0 0 0-5 5H3.75a.75.75 0 0 0 0 1.5h1.25a6.5 6.5 0 1 1-1.423 4.23.75.75 0 1 0-1.298.75 8 8 0 1 0 1.95-9.282.75.75 0 0 0-1.062 1.063 6.479 6.479 0 0 1 9.423-1.854 1.25 1.25 0 0 1 1.006 2.464Z" clip-rule="evenodd" /></svg>
+              <ArrowPathIcon :class="{'animate-spin': pending}" class="w-5 h-5" />
               <span class="hidden sm:inline">Refresh</span>
             </button>
             <button @click="sendMonthlySummary" class="btn-secondary hidden sm:inline-flex" :disabled="sendingMail">{{ sendingMail ? 'Sending…' : 'Email summary' }}</button>
@@ -151,9 +155,9 @@ const envBadge = (env?: string) => {
         </div>
         <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <nav class="inline-flex rounded-lg bg-slate-100 p-1 ring-1 ring-slate-200/80">
-            <button @click="tab='overview'" :class="['tab-btn', tab==='overview' ? 'tab-btn-active' : '']"><svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2.5 4A1.5 1.5 0 0 0 1 5.5V6h18v-.5A1.5 1.5 0 0 0 17.5 4h-15Z" clip-rule="evenodd" /><path d="M1 7.5v8A1.5 1.5 0 0 0 2.5 17h15a1.5 1.5 0 0 0 1.5-1.5v-8H1Z" /></svg>Overview</button>
-            <button @click="tab='months'"   :class="['tab-btn', tab==='months'   ? 'tab-btn-active' : '']"><svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.75 2a.75.75 0 0 1 .75.75V4h7V2.75a.75.75 0 0 1 1.5 0V4h.25A2.75 2.75 0 0 1 18 6.75v8.5A2.75 2.75 0 0 1 15.25 18H4.75A2.75 2.75 0 0 1 2 15.25v-8.5A2.75 2.75 0 0 1 4.75 4H5V2.75A.75.75 0 0 1 5.75 2Zm-1 5.5h10.5a.75.75 0 0 1 0 1.5H4.75a.75.75 0 0 1 0-1.5Z" clip-rule="evenodd" /></svg>Months</button>
-            <button @click="tab='sites'"    :class="['tab-btn', tab==='sites'    ? 'tab-btn-active' : '']"><svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7 3a1 1 0 0 0 0 2h6a1 1 0 1 0 0-2H7Z" /><path fill-rule="evenodd" d="M3 8a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm-1 5a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H2Z" clip-rule="evenodd" /></svg>Sites</button>
+            <button @click="tab='overview'" :class="['tab-btn', tab==='overview' ? 'tab-btn-active' : '']"><ChartBarIcon class="w-5 h-5"/> Overview</button>
+            <button @click="tab='months'"   :class="['tab-btn', tab==='months'   ? 'tab-btn-active' : '']"><CalendarDaysIcon class="w-5 h-5" /> Months</button>
+            <button @click="tab='sites'"    :class="['tab-btn', tab==='sites'    ? 'tab-btn-active' : '']"><GlobeEuropeAfricaIcon class="w-5 h-5" /> Sites</button>
           </nav>
           <div class="min-h-[1.25rem]">
             <p v-if="mailMsg" class="text-xs text-emerald-700">{{ mailMsg }}</p>
@@ -189,7 +193,7 @@ const envBadge = (env?: string) => {
         <div v-show="tab==='sites'" class="space-y-6">
           <div class="card"><div class="grid grid-cols-1 md:grid-cols-6 gap-4"><div class="md:col-span-3"><label for="site-search" class="filter-label">Search Site</label><input id="site-search" v-model="q" type="search" placeholder="By name, ID, or domain..." class="filter-input" /></div><div class="md:col-span-2"><label for="site-sort" class="filter-label">Sort By</label><select id="site-sort" v-model="sortBy" class="filter-input"><option value="az">A–Z</option><option value="renew-asc">Next maintenance ↑</option><option value="renew-desc">Next maintenance ↓</option></select></div><div class="md:col-span-1"><label for="site-env" class="filter-label">Env</label><select id="site-env" v-model="envFilter" class="filter-input"><option value="all">All</option><option value="production">Prod</option><option value="staging">Stage</option></select></div></div></div>
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            <div v-for="s in filtered" :key="s.id" class="card flex flex-col"><div class="flex items-center gap-4"><div class="h-12 w-12 rounded-xl bg-slate-100 ring-1 ring-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0"><img v-if="hostOf(s) && !favState[s.id]?.hide" :src="favState[s.id]?.triedFallback ? favFallback(hostOf(s)) : favPrimary(hostOf(s))" @error="(e) => onFavError(e, s.id, hostOf(s))" :alt="s.name || s.id" class="h-7 w-7" /><span v-else class="text-lg font-bold text-slate-500">{{ (s.name || s.id || '?').slice(0,1).toUpperCase() }}</span></div><div class="min-w-0"><h3 class="font-semibold text-slate-800 leading-tight truncate">{{ s.name || s.id }}</h3><p class="text-sm text-slate-500 truncate">{{ s.id }}</p></div></div><hr class="border-slate-200/60 my-4" /><div class="space-y-1 text-sm"><div class="flex justify-between"><span class="text-slate-500">Environment</span><span class="font-medium text-slate-700" :class="envBadge(s.env)">{{ s.env }}</span></div><div class="flex justify-between"><span class="text-slate-500">Next Maintenance</span><span class="font-medium text-slate-700">{{ formatRenew(s.nextMaintenance) || '—' }}</span></div></div><div class="mt-4 pt-4 border-t border-slate-200/60 flex-1 flex items-end justify-between"><NuxtLink :to="`/site/${s.id}`" class="text-sm font-semibold text-slate-600 hover:text-slate-900">View Details →</NuxtLink></div></div>
+            <div v-for="s in filtered" :key="s.id" class="card flex flex-col"><div class="flex items-center gap-4"><div class="h-12 w-12 rounded-xl bg-slate-100 ring-1 ring-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0"><img v-if="hostOf(s) && !favState[s.id]?.hide" :src="favState[s.id]?.triedFallback ? favFallback(hostOf(s)) : favPrimary(hostOf(s))" @error="(e) => onFavError(e, s.id, hostOf(s))" :alt="s.name || s.id" class="h-7 w-7" /><span v-else class="text-lg font-bold text-slate-500">{{ (s.name || s.id || '?').slice(0,1).toUpperCase() }}</span></div><div class="min-w-0"><h3 class="font-semibold text-slate-800 leading-tight truncate">{{ s.name || s.id }}</h3><p class="text-sm text-slate-500 truncate">{{ s.id }}</p></div></div><hr class="border-slate-200/60 my-4" /><div class="space-y-1 text-sm"><div class="flex justify-between"><span class="text-slate-500">Environment</span><span class="font-medium text-slate-700" :class="envBadge(s.env)">{{ s.env }}</span></div><div class="flex justify-between"><span class="text-slate-500">Next Maintenance</span><span class="font-medium text-slate-700">{{ formatRenew(s.nextMaintenance) || '—' }}</span></div></div><div class="mt-4 pt-4 border-t border-slate-200/60 flex-1 flex items-end justify-between"><NuxtLink :to="`/site/${s.id}`" class="text-sm font-semibold text-slate-600 hover:text-slate-900 flex gap-2 items-center">View Details <ArrowRightIcon class="w-3 h-3"/> </NuxtLink></div></div>
           </div>
           <div v-if="!pending && filtered.length === 0" class="card text-center text-slate-500">No sites match your filters.</div>
         </div>
