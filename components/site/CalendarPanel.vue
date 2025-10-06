@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// SCRIPT LOGIC IS LARGELY THE SAME, WITH 'q' (search) REMOVED
+// AND STATE ADDED FOR THE NEW ACTION MENU
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import type { MaintItem, MaintStatus, SiteDoc } from '~/composables/site'
 import {
@@ -107,23 +109,15 @@ const itemsWithDate = computed<ItemWithDate[]>(() =>
     .filter(Boolean) as ItemWithDate[]
 )
 
-/**
- * Groups items by month.
- * Optimized to iterate over items only once.
- */
 const monthGroups = computed(() => {
   const map = new Map<string, { meta: { start: Date; end: Date; key: string }, items: ItemWithDate[] }>()
   for (const m of months.value) {
     map.set(m.key, { meta: m, items: [] })
   }
-
   for (const it of itemsWithDate.value) {
     const key = `${it.dateObj.getUTCFullYear()}-${String(it.dateObj.getUTCMonth() + 1).padStart(2, '0')}`
-    if (map.has(key)) {
-      map.get(key)!.items.push(it)
-    }
+    if (map.has(key)) map.get(key)!.items.push(it)
   }
-
   for (const { items } of map.values()) {
     items.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime() || String(a.kind ?? '').localeCompare(String(b.kind ?? '')))
   }
@@ -131,7 +125,6 @@ const monthGroups = computed(() => {
 })
 
 // ---- Filters ----
-const q = ref('')
 const statusFilter = ref<MaintStatus | 'ALL'>('ALL')
 const labelReport = ref(false)
 const labelPreRen = ref(false)
@@ -141,10 +134,7 @@ const timeScope = ref<TimeScope>('ALL')
 const today = new Date(new Date().setUTCHours(0, 0, 0, 0))
 
 function matchesFilters(ev: ItemWithDate): boolean {
-  if (q.value.trim()) {
-    const text = `${ev.kind ?? ''} ${formatDateLine(ev.dateObj)} ${(ev as any).title ?? ''} ${(ev as any).notes ?? ''}`.toLowerCase()
-    if (!text.includes(q.value.trim().toLowerCase())) return false
-  }
+  // Search logic removed
   if (statusFilter.value !== 'ALL' && (ev.status ?? 'To-Do') !== statusFilter.value) return false
   if (labelReport.value && !ev.labels?.reportDue) return false
   if (labelPreRen.value && !ev.labels?.preRenewal) return false
@@ -154,7 +144,6 @@ function matchesFilters(ev: ItemWithDate): boolean {
   return true
 }
 
-/** Render only months in the selected year that match filters */
 const monthViews = computed(() => {
   const views: Array<{
     key: string
@@ -162,10 +151,8 @@ const monthViews = computed(() => {
     items: ItemWithDate[]
     summary: { total: number; byStatus: Record<string, number> }
   }> = []
-
   for (const [key, group] of monthGroups.value.entries()) {
     if (group.meta.start.getUTCFullYear() !== selectedYear.value) continue
-    
     const filteredItems = group.items.filter(matchesFilters)
     const byStatus: Record<string, number> = {}
     for (const it of filteredItems) {
@@ -203,64 +190,44 @@ function byLabel(by: HistoryEntry['by']): string {
 
 // ---- Optimistic UI & History Logic ----
 const optimistic = ref<Record<string, HistoryEntry[]>>({})
-
-/** Generates a stable key for a maintenance item. */
-function itemKey(ev: any) {
-  return ev?._id || ev?.id || `${ev?.date}-${ev?.kind || 'm'}`
-}
-
-/** Returns the full history for an item, including optimistic updates. */
+function itemKey(ev: any) { return ev?._id || ev?.id || `${ev?.date}-${ev?.kind || 'm'}` }
 function displayHistory(ev: ItemWithDate): HistoryEntry[] {
   const base = ev.history ?? []
   const opt = optimistic.value[itemKey(ev)] ?? []
   return [...base, ...opt].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 }
-
-/**
- * Returns the single latest history entry for an item.
- * Falls back to `updatedAt` if no formal history exists.
- * Returns `undefined` if no history information is available at all.
- */
 function latestHistory(ev: ItemWithDate): HistoryEntry | undefined {
   const fullHistory = displayHistory(ev)
-  if (fullHistory.length > 0) {
-    return fullHistory[0]
-  }
-  if (ev.updatedAt) {
-    return { at: ev.updatedAt, by: ev.updatedBy, to: ev.status ?? 'To-Do' }
-  }
+  if (fullHistory.length > 0) return fullHistory[0]
+  if (ev.updatedAt) return { at: ev.updatedAt, by: ev.updatedBy, to: ev.status ?? 'To-Do' }
   return undefined
 }
 
-// ---- Event Handlers ----
-function onChangeStatus(ev: ItemWithDate, to: MaintStatus) {
-  const from = (ev.status ?? 'To-Do') as MaintStatus | null
-  const at = new Date()
-  const k = itemKey(ev)
-  const entry: HistoryEntry = { at, by: props.currentUser, from, to }
-
-  // Add to optimistic updates
-  optimistic.value[k] = [entry, ...(optimistic.value[k] ?? [])]
-
-  emit('set-status', ev, to)
-  emit('status-change', { item: ev, from, to, by: props.currentUser, at })
-}
-
-// ---- Popover Management ----
+// ---- Event Handlers & Popover Management ----
 const openPopId = ref<string | null>(null)
+const openActionMenuId = ref<string | null>(null) // State for the new action menu
+
 function togglePop(ev: any) {
   const id = itemKey(ev)
   openPopId.value = openPopId.value === id ? null : id
+  openActionMenuId.value = null // Close other popover
 }
-function closePop() {
+function toggleActionMenu(ev: any) {
+  const id = itemKey(ev)
+  openActionMenuId.value = openActionMenuId.value === id ? null : id
+  openPopId.value = null // Close other popover
+}
+function closeAllPopovers() {
   openPopId.value = null
+  openActionMenuId.value = null
 }
 function onDocClick(e: MouseEvent) {
-  if (!(e.target as HTMLElement).closest('[data-popover-root]')) closePop()
+  if (!(e.target as HTMLElement).closest('[data-popover-root], [data-action-menu-root]')) {
+    closeAllPopovers()
+  }
 }
-function onDocKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') closePop()
-}
+function onDocKey(e: KeyboardEvent) { if (e.key === 'Escape') closeAllPopovers() }
+
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onDocKey)
@@ -270,11 +237,21 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onDocKey)
 })
 
+function onChangeStatus(ev: ItemWithDate, to: MaintStatus) {
+  const from = (ev.status ?? 'To-Do') as MaintStatus | null
+  const at = new Date()
+  const k = itemKey(ev)
+  const entry: HistoryEntry = { at, by: props.currentUser, from, to }
+  optimistic.value[k] = [entry, ...(optimistic.value[k] ?? [])]
+  emit('set-status', ev, to)
+  emit('status-change', { item: ev, from, to, by: props.currentUser, at })
+  closeAllPopovers() // Close menu after selection
+}
+
 function fmtDateTimeGB(d: Date | string) {
   return new Date(d).toLocaleString('en-GB', {
     year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
+    hour: '2-digit', minute: '2-digit', hour12: false,
   })
 }
 
@@ -289,131 +266,125 @@ watch(() => props.isLoading, (v) => { if (v) announce('Refreshing maintenance ca
 function onKey(e: KeyboardEvent) {
   const target = e.target as HTMLElement
   if (['input', 'select', 'textarea'].includes(target.tagName.toLowerCase()) || (e as any).isComposing) return
-  if (e.key === 'r' || e.key === 'R') {
-    emit('refresh')
-    announce('Calendar refreshed.')
-  } else if (e.key === '/') {
-    (document.getElementById('maint-search') as HTMLInputElement | null)?.focus()
-    e.preventDefault()
-  }
+  if (e.key === 'r' || e.key === 'R') { emit('refresh'); announce('Calendar refreshed.') }
+  // Search shortcut removed
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <div class="space-y-3" aria-labelledby="maint-cal-heading">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex items-center gap-3">
-        <h2 id="maint-cal-heading" class="text-lg font-semibold tracking-tight">
-          Maintenance calendar
-        </h2>
-        <div class="hidden md:flex items-center gap-1.5 rounded-xl border bg-white/80 px-1 py-1 shadow-sm">
-          <button @click="prevYear" :disabled="years.indexOf(selectedYear) <= 0" class="icon-btn" aria-label="Previous year" title="Previous year">
-            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+  <div class="space-y-6 bg-slate-50 p-4 sm:p-6 rounded-2xl" aria-labelledby="maint-cal-heading">
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <h2 id="maint-cal-heading" class="text-2xl font-bold text-slate-800 tracking-tight">Maintenance Calendar</h2>
+        <p class="text-slate-500 mt-1">Viewing scheduled events for {{ selectedYear }}</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex items-center rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
+          <button @click="prevYear" :disabled="years.indexOf(selectedYear) <= 0" class="year-pager-btn rounded-l-md" aria-label="Previous year">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
           </button>
           <select v-model="selectedYear" class="year-select" aria-label="Select year">
             <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
           </select>
-          <button @click="nextYear" :disabled="years.indexOf(selectedYear) >= years.length - 1" class="icon-btn" aria-label="Next year" title="Next year">
-            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+          <button @click="nextYear" :disabled="years.indexOf(selectedYear) >= years.length - 1" class="year-pager-btn rounded-r-md" aria-label="Next year">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" /></svg>
           </button>
         </div>
-      </div>
-      <div>
-        <button @click="emit('refresh')" class="btn" :aria-busy="!!isLoading" title="Refresh (r)">
-          <svg viewBox="0 0 24 24" class="h-4 w-4" :class="{'animate-spin': isLoading}" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 10-3.5 7.1M21 12V6m0 6h-6"/></svg>
-          <span>{{ isLoading ? 'Refreshing…' : 'Refresh' }}</span>
+        <button @click="emit('refresh')" class="btn-primary" :aria-busy="!!isLoading" title="Refresh (r)">
+          <svg viewBox="0 0 24 24" class="h-5 w-5" :class="{'animate-spin': isLoading}" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 10-3.5 7.1M21 12V6m0 6h-6"/></svg>
+          <span>{{ isLoading ? 'Refreshing' : 'Refresh' }}</span>
         </button>
       </div>
-    </div>
+    </header>
 
-    <div class="md:hidden grid grid-cols-1 gap-2">
-      <div class="flex items-center gap-2">
-        <button @click="prevYear" :disabled="years.indexOf(selectedYear) <= 0" class="rounded-lg border px-2 py-2 text-sm disabled:opacity-50" aria-label="Previous year">‹</button>
-        <select v-model="selectedYear" class="flex-1 rounded-lg border px-2 py-2 text-sm" aria-label="Select year">
-          <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-        </select>
-        <button @click="nextYear" :disabled="years.indexOf(selectedYear) >= years.length - 1" class="rounded-lg border px-2 py-2 text-sm disabled:opacity-50" aria-label="Next year">›</button>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="flex items-center gap-1 rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
+        <button @click="timeScope = 'ALL'" :class="timeScope === 'ALL' ? 'filter-btn-active' : 'filter-btn'" class="flex-1">All</button>
+        <button @click="timeScope = 'UPCOMING'" :class="timeScope === 'UPCOMING' ? 'filter-btn-active' : 'filter-btn'" class="flex-1">Upcoming</button>
+        <button @click="timeScope = 'PAST'" :class="timeScope === 'PAST' ? 'filter-btn-active' : 'filter-btn'" class="flex-1">Past</button>
       </div>
-      <input id="maint-search" v-model="q" type="search" inputmode="search" placeholder="Search ( / )" class="rounded-lg border px-3 py-2 text-sm" aria-label="Search maintenance"/>
-      <div class="grid grid-cols-2 gap-2">
-        <select v-model="timeScope" class="rounded-lg border px-2 py-2 text-sm" aria-label="Filter by time window">
-          <option value="ALL">All Times</option>
-          <option value="UPCOMING">Upcoming</option>
-          <option value="PAST">Past</option>
-        </select>
-        <select v-model="statusFilter" class="rounded-lg border px-2 py-2 text-sm" aria-label="Filter by status">
-          <option value="ALL">All Statuses</option>
-          <option v-for="s in STATUS_LIST" :key="s" :value="s">{{ s }}</option>
-        </select>
-      </div>
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <label class="inline-flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" v-model="labelReport" class="rounded border-gray-300" /> <span class="chip chip-violet">Report</span></label>
-        <label class="inline-flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" v-model="labelPreRen" class="rounded border-gray-300" /> <span class="chip chip-amber">Pre-renewal</span></label>
-        <label class="inline-flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" v-model="labelMid" class="rounded border-gray-300" /> <span class="chip chip-blue">Mid-year</span></label>
+      <select v-model="statusFilter" class="filter-input" aria-label="Filter by status">
+        <option value="ALL">All Statuses</option>
+        <option v-for="s in STATUS_LIST" :key="s" :value="s">{{ s }}</option>
+      </select>
+      <div class="flex items-center justify-start md:col-span-2 lg:col-span-1 lg:justify-end gap-2">
+        <label class="filter-chip-label"><input type="checkbox" v-model="labelReport" class="sr-only peer" /><span class="filter-chip peer-checked:bg-violet-500 peer-checked:text-white peer-checked:border-violet-500">Report</span></label>
+        <label class="filter-chip-label"><input type="checkbox" v-model="labelPreRen" class="sr-only peer" /><span class="filter-chip peer-checked:bg-amber-500 peer-checked:text-white peer-checked:border-amber-500">Pre-renewal</span></label>
+        <label class="filter-chip-label"><input type="checkbox" v-model="labelMid" class="sr-only peer" /><span class="filter-chip peer-checked:bg-blue-500 peer-checked:text-white peer-checked:border-blue-500">Mid-year</span></label>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-      <section v-for="v in monthViews" :id="`month-${v.meta.key}`" :key="v.meta.key" class="rounded-2xl border bg-white p-5 shadow-sm hover:shadow transition-shadow" :aria-labelledby="`heading-${v.meta.key}`">
-        <div class="flex items-center justify-between gap-3">
-          <h3 :id="`heading-${v.meta.key}`" class="text-base font-semibold tracking-tight">{{ formatMonth(v.meta.start) }}</h3>
-          <div class="flex items-center gap-2 text-xs text-gray-600">
-            <span v-if="isRenewalMonthUTC(v.meta.start)" class="chip chip-green !py-0.5">Renewal</span>
-            <span v-if="v.summary.total">{{ v.summary.total }} item{{ v.summary.total===1 ? '' : 's' }}</span>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <section v-for="v in monthViews" :id="`month-${v.meta.key}`" :key="v.meta.key" class="bg-white rounded-xl shadow-sm ring-1 ring-slate-200/50 p-5 space-y-4" :aria-labelledby="`heading-${v.meta.key}`">
+        <header class="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
+          <h3 :id="`heading-${v.meta.key}`" class="text-lg font-semibold text-slate-800">{{ formatMonth(v.meta.start) }}</h3>
+          <div class="flex items-center gap-2">
+            <span v-if="isRenewalMonthUTC(v.meta.start)" class="chip chip-green">Renewal</span>
+            <span v-if="v.summary.total" class="text-sm font-medium text-slate-500">{{ v.summary.total }}</span>
           </div>
-        </div>
+        </header>
 
-        <ul v-if="v.items.length" class="mt-4 space-y-3">
-          <li v-for="ev in v.items" :key="itemKey(ev)" class="group rounded-xl border px-3 py-3 hover:bg-gray-50 focus-within:ring-1 focus-within:ring-gray-300">
-            <div class="grid grid-cols-[auto,1fr] items-start gap-3">
-              <div class="h-12 w-12 rounded-lg border bg-white shadow-sm flex flex-col items-center justify-center">
-                <div class="text-sm font-semibold leading-none">{{ dayNum(ev.dateObj) }}</div>
-                <div class="text-[10px] text-gray-500 leading-none">{{ dayWk(ev.dateObj) }}</div>
+        <ul v-if="v.items.length" class="space-y-3">
+          <li v-for="ev in v.items" :key="itemKey(ev)" class="group rounded-lg ring-1 ring-slate-200/80 hover:ring-slate-300 bg-slate-50/50 hover:bg-white transition-all duration-200 p-3">
+            <div class="flex items-start gap-4">
+              <div class="flex-shrink-0 w-14 text-center rounded-md overflow-hidden ring-1 ring-slate-200 shadow-sm bg-white">
+                <div class="bg-slate-700 text-white text-xs font-bold uppercase py-1">{{ dayWk(ev.dateObj) }}</div>
+                <div class="text-2xl font-bold text-slate-800 py-1.5">{{ dayNum(ev.dateObj) }}</div>
               </div>
-              <div class="min-w-0">
-                <p class="font-medium truncate">{{ ev.kind === 'report' || ev.labels?.reportDue ? 'Report due' : 'Maintenance' }}</p>
-                <div class="mt-1 flex flex-wrap gap-1.5 text-xs">
+              <div class="min-w-0 flex-1">
+                <p class="font-semibold text-slate-800 truncate">{{ ev.kind === 'report' || ev.labels?.reportDue ? 'Report Due' : 'Maintenance' }}</p>
+                <div v-if="ev.labels?.reportDue || ev.labels?.preRenewal || ev.labels?.midYear" class="mt-1.5 flex flex-wrap gap-1.5">
                   <span v-if="ev.labels?.reportDue" class="chip chip-violet">Report</span>
                   <span v-if="ev.labels?.preRenewal" class="chip chip-amber">Pre-renewal</span>
                   <span v-if="ev.labels?.midYear" class="chip chip-blue">Mid-year</span>
                 </div>
               </div>
             </div>
-
-            <div class="mt-3 flex items-center justify-between gap-3">
-              <div v-if="latestHistory(ev)" class="relative text-xs text-gray-700" data-popover-root>
-                <button type="button" @click.stop="togglePop(ev)" class="underline decoration-dotted underline-offset-2 hover:no-underline block" :aria-expanded="openPopId === itemKey(ev)" :aria-controls="`pop-${itemKey(ev)}`" title="View status change history">
-                  Updated {{ fmtDateTimeGB(latestHistory(ev)!.at).slice(0, 10) }} by {{ byLabel(latestHistory(ev)!.by) }}
+            <hr class="my-3 border-slate-200/80" />
+            <div class="flex items-center justify-between text-sm">
+              <div v-if="latestHistory(ev)" class="relative text-slate-600" data-popover-root>
+                <button type="button" @click.stop="togglePop(ev)" class="flex items-center gap-1.5 hover:text-slate-900 transition-colors" :aria-expanded="openPopId === itemKey(ev)" :aria-controls="`pop-${itemKey(ev)}`">
+                  <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6.25.75a.75.75 0 0 0 0 1.5h.5a.75.75 0 0 0 0-1.5h-.5ZM8 4a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 8 4Z" clip-rule="evenodd" /></svg>
+                  <span>{{ byLabel(latestHistory(ev)!.by) }}</span>
                 </button>
-                <div v-if="openPopId === itemKey(ev)" :id="`pop-${itemKey(ev)}`" role="dialog" aria-label="Status change history" class="absolute z-20 mt-2 w-80 max-w-[85vw] rounded-xl border bg-white shadow-lg p-3" @click.stop>
-                  <div class="mb-2 text-xs font-semibold text-gray-700">Status Changes</div>
-                  <ol class="space-y-1.5 text-xs">
-                    <li v-for="(h, i) in displayHistory(ev)" :key="i" class="grid grid-cols-[auto,1fr] gap-2">
-                      <span class="text-[11px] text-gray-500 whitespace-nowrap">{{ fmtDateTimeGB(h.at) }}</span>
-                      <span><strong>{{ byLabel(h.by) }}</strong> — {{ h.from || 'N/A' }} → {{ h.to }}</span>
+                <div v-if="openPopId === itemKey(ev)" :id="`pop-${itemKey(ev)}`" role="dialog" aria-label="Status change history" class="popover">
+                  <h4 class="font-semibold text-slate-700 mb-2">Status Changes</h4>
+                  <ol class="space-y-2 text-xs">
+                    <li v-for="(h, i) in displayHistory(ev)" :key="i" class="flex items-start gap-2">
+                      <span class="text-slate-500 whitespace-nowrap mt-0.5">{{ fmtDateTimeGB(h.at) }}</span>
+                      <p class="text-slate-700"><strong>{{ byLabel(h.by) }}</strong> changed status from <strong class="font-mono">{{ h.from || 'N/A' }}</strong> to <strong class="font-mono">{{ h.to }}</strong>.</p>
                     </li>
-                    <li v-if="!displayHistory(ev).length" class="text-gray-500">No history entries.</li>
+                    <li v-if="!displayHistory(ev).length" class="text-slate-500">No history entries.</li>
                   </ol>
-                  <button type="button" @click.stop="closePop()" class="mt-3 w-full rounded-lg border px-2.5 py-1 text-xs hover:bg-gray-50">Close</button>
-                  <div class="pointer-events-none absolute -top-1.5 left-4 h-3 w-3 rotate-45 border-l border-t bg-white"></div>
+                  <div class="absolute -top-1.5 left-5 h-3 w-3 rotate-45 bg-white ring-1 ring-slate-200"></div>
                 </div>
               </div>
-              <div v-else class="text-xs text-gray-400">No updates</div>
+              <div v-else class="text-sm text-slate-400">No updates</div>
 
               <div class="flex items-center gap-2">
                 <span :class="statusClass(ev.status)">{{ ev.status || 'To-Do' }}</span>
-                <select v-if="canManageSite" :value="ev.status || 'To-Do'" @change="onChangeStatus(ev, ($event.target as HTMLSelectElement).value as any)" class="rounded-md border-gray-300 px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500" title="Update status" aria-label="Update status">
-                  <option v-for="s in STATUS_LIST" :key="s" :value="s">{{ s }}</option>
-                </select>
+                <div v-if="canManageSite" class="relative" data-action-menu-root>
+                  <button @click="toggleActionMenu(ev)" type="button" class="action-menu-btn" aria-label="Update status">
+                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 8.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM11.5 15.5a1.5 1.5 0 10-3 0 1.5 1.5 0 003 0z" /></svg>
+                  </button>
+                  <div v-if="openActionMenuId === itemKey(ev)" class="action-menu">
+                    <div class="py-1">
+                      <button v-for="s in STATUS_LIST" :key="s" @click="onChangeStatus(ev, s)" class="action-menu-item" :class="{'bg-slate-100 text-slate-900': (ev.status || 'To-Do') === s}">{{ s }}</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </li>
         </ul>
         
-        <div v-else-if="isLoading" class="mt-4 rounded-xl border border-dashed px-3 py-6 text-center text-sm text-gray-500 animate-pulse">Loading…</div>
-        <div v-else class="mt-4 rounded-xl border border-dashed px-3 py-6 text-center text-sm text-gray-500">No maintenance for this month.</div>
+        <div v-else class="text-center py-8 px-4 rounded-lg bg-slate-50">
+          <svg class="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
+          <h4 class="mt-2 text-sm font-semibold text-slate-800">{{ isLoading ? 'Loading Events...' : 'No Events Scheduled' }}</h4>
+          <p class="mt-1 text-sm text-slate-500">{{ isLoading ? 'Please wait a moment.' : 'This month is clear.' }}</p>
+        </div>
       </section>
     </div>
 
@@ -422,23 +393,59 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
-.btn {
-  @apply inline-flex items-center gap-2 rounded-xl border bg-white/80 px-3 py-2 text-sm shadow-sm
-         hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+/* Component-specific utility classes */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white
+         shadow-sm ring-1 ring-slate-800 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+         focus-visible:ring-slate-700 transition-colors duration-200 disabled:opacity-50;
 }
-.icon-btn {
-  @apply inline-flex h-8 w-8 items-center justify-center rounded-lg
-         hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:opacity-50 disabled:hover:bg-transparent;
+.year-pager-btn {
+  @apply px-2 py-2 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:z-10 transition-colors duration-200;
 }
 .year-select {
-  @apply bg-transparent px-2 py-1 rounded-lg text-sm border-none
-         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1;
+  @apply border-x border-slate-200 bg-transparent px-3 py-1.5 text-sm font-medium text-slate-700
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:z-10;
 }
-.chip {
-  @apply inline-block rounded-full px-2 py-0.5 font-medium;
+.filter-input {
+  @apply w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm
+         ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-slate-500 transition;
 }
-.chip-violet { @apply bg-violet-100 text-violet-800; }
-.chip-amber { @apply bg-amber-100 text-amber-800; }
-.chip-blue { @apply bg-blue-100 text-blue-800; }
-.chip-green { @apply bg-emerald-100 text-emerald-800; }
+.filter-btn {
+  @apply rounded-md px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-800
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-slate-400 transition-colors;
+}
+.filter-btn-active {
+  @apply rounded-md px-3 py-1.5 text-sm font-semibold bg-slate-800 text-white shadow-inner
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-slate-800 transition-colors;
+}
+.filter-chip-label { @apply cursor-pointer; }
+.filter-chip {
+  @apply inline-block rounded-full px-3 py-1 text-sm font-medium border border-slate-300 bg-white text-slate-700
+         hover:bg-slate-50 transition-colors duration-200;
+}
+.chip { @apply inline-block rounded-full px-2 py-0.5 text-xs font-semibold; }
+.chip-violet { @apply bg-violet-100 text-violet-800 ring-1 ring-inset ring-violet-200; }
+.chip-amber { @apply bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-200; }
+.chip-blue { @apply bg-blue-100 text-blue-800 ring-1 ring-inset ring-blue-200; }
+.chip-green { @apply bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-200; }
+
+.popover {
+  @apply absolute z-20 mt-2 w-80 max-w-[85vw] rounded-lg bg-white p-4 shadow-xl
+         ring-1 ring-slate-200 focus:outline-none;
+}
+
+/* NEW styles for the redesigned status action menu */
+.action-menu-btn {
+  @apply rounded-md p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 transition-colors;
+}
+.action-menu {
+  @apply absolute right-0 z-20 mt-2 w-36 origin-top-right rounded-md bg-white shadow-lg
+         ring-1 ring-black ring-opacity-5 focus:outline-none;
+}
+.action-menu-item {
+  @apply block w-full px-4 py-2 text-left text-sm text-slate-700
+         hover:bg-slate-100 hover:text-slate-900;
+}
 </style>
