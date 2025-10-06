@@ -21,6 +21,25 @@ export interface MaintItem {
   labels?: { preRenewal?: boolean; reportDue?: boolean; midYear?: boolean }
   status?: MaintStatus
 }
+export interface Contact {
+  name?: string | null
+  title?: string | null
+  emails?: string[]
+  phones?: string[]
+}
+
+export interface SiteDoc {
+  id: string
+  name?: string|null
+  env: 'production'|'staging'|'dev'|'test'
+  renewMonth: number
+  websiteUrl?: string|null
+  gitUrl?: string|null
+  primaryContact?: PrimaryContact|null
+  groupEmail?: string|null         // ★ add
+  contacts?: Contact[]             // ★ add
+}
+
 export interface ChangelogEntry {
   _id?: string
   site?: { id: string; env: string }

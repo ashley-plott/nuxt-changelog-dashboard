@@ -25,14 +25,34 @@ function normalizeUrl(u?: string): string {
   catch { return s }
 }
 
-/**
- * Cadence:
- *   Renewal month R (1..12) -> r = R-1 (0..11)
- *   Pre-renewal (anchor) = r-2
- *   Minor maint. every 2 months from pre-renewal: pre, pre+2, pre+4, pre+6(mid), pre+8, pre+10
- *   Reports due = r-1 (one month after pre-renewal)
- *   Mid-year    = pre + 6
- */
+const normalizeEmail = (v?: any) => {
+  const t = (typeof v === 'string' ? v : '').trim().toLowerCase()
+  return t || ''
+}
+
+type SanitizedContact = {
+  name: string
+  title: string | null
+  emails: string[]
+  phones: string[]
+}
+
+/** sanitize contacts payload into array of {name, title, emails[], phones[]} */
+function sanitizeContacts(input: any): SanitizedContact[] {
+  if (!Array.isArray(input)) return []
+  return input.map((c) => {
+    const name  = (c?.name ?? '').toString().trim()
+    const title = (c?.title ?? '').toString().trim() || null
+    const emails = Array.isArray(c?.emails)
+      ? c.emails.map(normalizeEmail).filter(Boolean)
+      : (c?.email ? [normalizeEmail(c.email)] : [])
+    const phones = Array.isArray(c?.phones)
+      ? c.phones.map((p:any) => (p ?? '').toString().trim()).filter(Boolean)
+      : (c?.phone ? [(c.phone ?? '').toString().trim()] : [])
+    return { name, title, emails, phones }
+  }).filter(c => c.name || c.title || c.emails.length || c.phones.length)
+}
+
 export default defineEventHandler(async (event) => {
   await requireRole(event, ['manager', 'admin'])
 
@@ -47,14 +67,18 @@ export default defineEventHandler(async (event) => {
   // Optionals (normalized)
   const websiteUrl = normalizeUrl(typeof body?.websiteUrl === 'string' ? body.websiteUrl : '')
   const gitUrl     = normalizeUrl(typeof body?.gitUrl === 'string' ? body.gitUrl : '')
+  const groupEmail = typeof body?.groupEmail === 'string' ? normalizeEmail(body.groupEmail) : ''
+
   const primaryContact = body?.primaryContact && typeof body.primaryContact === 'object'
     ? {
         name:  (body.primaryContact.name  || '').trim(),
-        email: (body.primaryContact.email || '').trim(),
+        email: normalizeEmail(body.primaryContact.email),
         phone: (body.primaryContact.phone || '').trim(),
+        title: (body.primaryContact.title || '').toString().trim() || undefined
       }
     : null
-  const groupEmail = body?.groupEmail === 'string' ? body.groupEmail : ''
+
+  const contacts = sanitizeContacts(body?.contacts)
 
   // Window & rebuild
   const rebuild        = !!body?.rebuild
@@ -68,18 +92,26 @@ export default defineEventHandler(async (event) => {
   const siteSet: any = { id, name, env, renewMonth, updatedAt: now }
   const siteUnset: any = {}
 
-  if (body.hasOwnProperty('websiteUrl')) {
+  if (Object.prototype.hasOwnProperty.call(body, 'websiteUrl')) {
     if (websiteUrl) siteSet.websiteUrl = websiteUrl
     else siteUnset.websiteUrl = ''
   }
-  if (body.hasOwnProperty('gitUrl')) {
+  if (Object.prototype.hasOwnProperty.call(body, 'gitUrl')) {
     if (gitUrl) siteSet.gitUrl = gitUrl
     else siteUnset.gitUrl = ''
   }
-  if (body.hasOwnProperty('primaryContact')) {
+  if (Object.prototype.hasOwnProperty.call(body, 'primaryContact')) {
     const has = !!(primaryContact?.name || primaryContact?.email || primaryContact?.phone)
     if (has) siteSet.primaryContact = primaryContact
     else siteUnset.primaryContact = ''
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'contacts')) {
+    if (contacts.length) siteSet.contacts = contacts
+    else siteUnset.contacts = ''
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'groupEmail')) {
+    if (groupEmail) siteSet.groupEmail = groupEmail
+    else siteUnset.groupEmail = ''
   }
 
   const update: any = { $set: siteSet, $setOnInsert: { createdAt: now } }
@@ -114,7 +146,7 @@ export default defineEventHandler(async (event) => {
       date: dateISO,
       labels,
       kind,
-      status: 'To-Do' as MaintStatus,   // default
+      status: 'To-Do' as MaintStatus,
       createdAt: now,
       updatedAt: now,
       statusHistory: [{ at: now, status: 'To-Do' as MaintStatus }]
@@ -123,56 +155,44 @@ export default defineEventHandler(async (event) => {
     ops.push(
       db.collection('maintenance').updateOne(
         { 'site.id': id, 'site.env': env, date: dateISO },
-        // If not rebuilding, don't overwrite existing docs (keeps any custom status)
         rebuild ? { $set: ev } : { $setOnInsert: ev },
         { upsert: true }
       )
     )
   }
 
-  // ----- 1) Two-month cadence anchored to preIdx (all 'maintenance') -----
-  // Start from the first occurrence of preIdx on/before windowStart, then step by 2 months
+  // 1) Two-month cadence anchored at preIdx
   let cadence = firstOfMonthUTC(windowStart.getUTCFullYear(), preIdx)
   if (cadence > windowStart) cadence = firstOfMonthUTC(windowStart.getUTCFullYear() - 1, preIdx)
 
   for (let d = cadence; d < stop; d = addMonths(d, 2)) {
     if (d < windowStart) continue
     const m = d.getUTCMonth()
-    const labels = {
-      preRenewal: m === preIdx,
-      reportDue:  false,             // reports handled separately
-      midYear:    m === midIdx
-    }
+    const labels = { preRenewal: m === preIdx, reportDue: false, midYear: m === midIdx }
     upsertItem(d, 'maintenance', labels)
   }
 
-  // ----- 2) Report months (R−1) as standalone 'report' items -----
+  // 2) Report months (R−1)
   for (let d = firstOfMonthUTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth()); d < stop; d = addMonths(d, 1)) {
     if (d.getUTCMonth() !== reportIdx) continue
     const m = d.getUTCMonth()
-    const labels = {
-      preRenewal: m === preIdx,
-      reportDue:  true,
-      midYear:    m === midIdx
-    }
+    const labels = { preRenewal: m === preIdx, reportDue: true, midYear: m === midIdx }
     upsertItem(d, 'report', labels)
   }
 
   await Promise.all(ops)
 
-  // Return site (including optionals)
+  // Return saved site snapshot
   const savedSite = await db.collection('sites').findOne({ id })
   return {
     ok: true,
     site: {
-      id,
-      name,
-      env,
-      renewMonth,
+      id, name, env, renewMonth,
       websiteUrl: savedSite?.websiteUrl || null,
       gitUrl: savedSite?.gitUrl || null,
       primaryContact: savedSite?.primaryContact || null,
-      groupEmail: savedSite?.groupEmail || null
+      groupEmail: savedSite?.groupEmail || null,
+      contacts: savedSite?.contacts || []
     },
     scheduleWindow: {
       from: toISODate(windowStart),
