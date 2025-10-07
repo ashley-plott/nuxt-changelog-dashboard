@@ -127,15 +127,38 @@ watch([repoSlug, () => site.value?.env], async ([slug, env]) => {
 }, { immediate: true })
 
 // ====== Actions passed down ======
-async function setItemStatus(ev: MaintItem, next: MaintStatus) {
+// pages/site/[id].vue
+async function setItemStatus(ev, next) {
   if (!canManageSite.value) return
+  // include actor + previous status
   await $fetch('/api/scheduler/maintenance/status', {
     method: 'PATCH',
-    body: { siteId: ev.site.id, env: ev.site.env, date: ev.date, status: next },
+    body: {
+      siteId: ev.site.id,
+      env: ev.site.env,
+      date: ev.date,
+      status: next,
+      from: ev.status ?? null,
+      by: my ? { id: my.id, name: my.name, email: my.email } : null
+    },
     headers
-  }).catch(() => {})
+  }).catch((e) => { console.error('status failed:', e) })
+
+  // keep audit as best-effort (optional)
+  await $fetch('/api/scheduler/maintenance/audit', {
+    method: 'POST',
+    body: {
+      siteId: ev.site.id, env: ev.site.env, date: ev.date,
+      from: ev.status ?? null, to: next,
+      by: my ? { id: my.id, name: my.name, email: my.email } : null,
+      at: new Date()
+    },
+    headers
+  }).catch((e) => { console.error('audit failed:', e) })
+
   await refreshSite()
 }
+
 async function recordStatusChange(payload: any) {
   if (!payload?.item) return
   try {
