@@ -274,8 +274,9 @@ watch(
       if (!c.phones.length) c.phones.push('')
     })
   },
-  { immediate: true, deep: false }
+  { immediate: true }
 )
+
 
 /* ------------ Helpers ------------ */
 function sanitizedContacts() {

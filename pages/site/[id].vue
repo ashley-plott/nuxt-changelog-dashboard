@@ -26,7 +26,7 @@ const my = authed ? me.user : null
 
 // Site & maintenance
 const { data, pending, error, refresh: refreshSite } = await useFetch<{ site: SiteDoc; items: MaintItem[] }>(
-  `/api/scheduler/sites/${id}`, { headers, key: `site-${id}` }
+  `/api/scheduler/sites/${id}`, { headers, key: `site-v2-${id}` }
 )
 const site  = computed(() => data.value?.site)
 const items = computed(() => (data.value?.items || []))
@@ -99,6 +99,9 @@ onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onDocKey)
+
+  console.log('site (client):', site.value)
+  console.log('groupEmail:', site.value?.groupEmail)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
