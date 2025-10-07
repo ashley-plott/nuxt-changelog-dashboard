@@ -217,7 +217,7 @@ const det = reactive({
   renewMonth: 1,
   websiteUrl: '',
   gitUrl: '',
-  groupEmail: '' as string
+  groupEmail: ''
 })
 
 // IMPORTANT: keep contacts as a ref for rock-solid updates
@@ -243,7 +243,7 @@ watch(
     det.renewMonth = Number(s.renewMonth || 1)
     det.websiteUrl = (s.websiteUrl || (s as any).url || '')
     det.gitUrl = s.gitUrl || ''
-    det.groupEmail = normalizeEmail((s as any).groupEmail || '')
+    det.groupEmail = (s as any).groupEmail || ''
 
     if (Array.isArray((s as any).contacts) && (s as any).contacts.length) {
       contacts.value = (s as any).contacts.map((c: any) => ({

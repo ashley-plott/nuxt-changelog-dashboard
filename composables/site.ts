@@ -9,18 +9,12 @@ export type MaintStatus =
   | 'Chased Via Phone'
   | 'Completed'
 
-export interface PrimaryContact { name?: string|null; email?: string|null; phone?: string|null }
-export interface SiteDoc {
-  id: string; name?: string|null; env: 'production'|'staging'|'dev'|'test';
-  renewMonth: number; websiteUrl?: string|null; gitUrl?: string|null; primaryContact?: PrimaryContact|null
+export interface PrimaryContact {
+  name?: string | null
+  email?: string | null
+  phone?: string | null
 }
-export interface MaintItem {
-  site: { id: string; name?: string; env: string }
-  date: string
-  kind?: 'maintenance' | 'report'
-  labels?: { preRenewal?: boolean; reportDue?: boolean; midYear?: boolean }
-  status?: MaintStatus
-}
+
 export interface Contact {
   name?: string | null
   title?: string | null
@@ -30,14 +24,22 @@ export interface Contact {
 
 export interface SiteDoc {
   id: string
-  name?: string|null
-  env: 'production'|'staging'|'dev'|'test'
+  name?: string | null
+  env: 'production' | 'staging' | 'dev' | 'test'
   renewMonth: number
-  websiteUrl?: string|null
-  gitUrl?: string|null
-  primaryContact?: PrimaryContact|null
-  groupEmail?: string|null         // ★ add
-  contacts?: Contact[]             // ★ add
+  websiteUrl?: string | null
+  gitUrl?: string | null
+  primaryContact?: PrimaryContact | null
+  groupEmail?: string | null          // ← keep
+  contacts?: Contact[]                // ← keep
+}
+
+export interface MaintItem {
+  site: { id: string; name?: string; env: string }
+  date: string
+  kind?: 'maintenance' | 'report'
+  labels?: { preRenewal?: boolean; reportDue?: boolean; midYear?: boolean }
+  status?: MaintStatus
 }
 
 export interface ChangelogEntry {
@@ -60,8 +62,9 @@ export interface ChangelogEntry {
     removed?: Array<{ name: string; old: string }>
     unchanged?: Array<{ name: string; version: string }>
   }
-  plugins?: Array<{ name: string; old?: string|null; new?: string|null; status: 'updated'|'added'|'removed'|'unchanged'|'current' }>
+  plugins?: Array<{ name: string; old?: string | null; new?: string | null; status: 'updated' | 'added' | 'removed' | 'unchanged' | 'current' }>
 }
+
 export interface FormLog {
   _id?: string
   site?: { id: string; env: string }
@@ -72,15 +75,26 @@ export interface FormLog {
 }
 
 export const STATUS_LIST: MaintStatus[] = [
-  'To-Do','In Progress','Awaiting Form Conf','Chased Via Email','Chased Via Phone','Completed'
+  'To-Do',
+  'In Progress',
+  'Awaiting Form Conf',
+  'Chased Via Email',
+  'Chased Via Phone',
+  'Completed'
 ]
 
-export function firstOfMonthUTC(d = new Date()) { return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)) }
-export function formatMonth(d: Date) { return d.toLocaleString(undefined, { month: 'long', year: 'numeric' }) }
-export function formatDateLine(d: Date) { return d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) }
+export function firstOfMonthUTC(d = new Date()) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
+}
+export function formatMonth(d: Date) {
+  return d.toLocaleString(undefined, { month: 'long', year: 'numeric' })
+}
+export function formatDateLine(d: Date) {
+  return d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+}
 export function dayNum(d: Date) { return String(d.getDate()).padStart(2, '0') }
 export function dayWk(d: Date)  { return d.toLocaleString(undefined, { weekday: 'short' }) }
-export const toISOOrUndefined = (s:string) => s ? new Date(s).toISOString() : undefined
+export const toISOOrUndefined = (s: string) => (s ? new Date(s).toISOString() : undefined)
 
 export function statusClass(s?: MaintStatus) {
   const base = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-medium shadow-sm'
@@ -94,7 +108,12 @@ export function statusClass(s?: MaintStatus) {
   }
 }
 
-export function normalizeUrl(u:string){
-  const s=(u||'').trim(); if(!s) return ''
-  try{ return new URL(s.startsWith('http')?s:`https://${s}`).toString() } catch { return s }
+export function normalizeUrl(u: string) {
+  const s = (u || '').trim()
+  if (!s) return ''
+  try {
+    return new URL(s.startsWith('http') ? s : `https://${s}`).toString()
+  } catch {
+    return s
+  }
 }
