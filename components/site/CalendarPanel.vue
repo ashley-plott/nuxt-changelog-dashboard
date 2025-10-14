@@ -338,7 +338,50 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 <div class="text-2xl font-bold text-slate-800 py-1.5">{{ dayNum(ev.dateObj) }}</div>
               </div>
               <div class="min-w-0 flex-1">
-                <p class="font-semibold text-slate-800 truncate">{{ ev.kind === 'report' || ev.labels?.reportDue ? 'Report Due' : 'Maintenance' }}</p>
+                <div class="relative group/tooltip">
+                  <div class="flex items-center gap-2">
+                    <p class="font-semibold text-slate-800 truncate">
+                      {{ ev.kind === 'report' || ev.labels?.reportDue ? 'Report Due' : 'Maintenance' }}
+                    </p>
+                    <svg v-if="!ev.labels?.reportDue" class="w-4 h-4 text-slate-400 cursor-help flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                  </div>
+                  <!-- Maintenance Tasks Tooltip -->
+                  <div v-if="!ev.labels?.reportDue" class="invisible group-hover/tooltip:visible absolute bottom-full left-0 mb-2 w-80 bg-slate-800 text-white text-sm rounded-lg shadow-lg p-4 z-50 opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200">
+                    <h4 class="font-semibold mb-3 text-slate-100">
+                      {{ ev.labels?.preRenewal || ev.labels?.midYear ? 'Mid/Pre-Renewal Tasks:' : 'Standard Maintenance Tasks:' }}
+                    </h4>
+                    <ul class="space-y-2 text-slate-200">
+                      <li v-if="ev.labels?.preRenewal || ev.labels?.midYear" class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
+                        <span>Plugin/WordPress Updates</span>
+                      </li>
+                      <li class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
+                        <span>Visual Checks (Including mobile and responsive)</span>
+                      </li>
+                      <li class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
+                        <span>All Form(s) Check (Live Only) {{ ev.labels?.preRenewal || ev.labels?.midYear ? '- Use group email' : '' }}</span>
+                      </li>
+                      <li class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
+                        <span>Site Speed Check</span>
+                      </li>
+                      <li v-if="ev.labels?.preRenewal || ev.labels?.midYear" class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
+                        <span>Spot Check Page Links</span>
+                      </li>
+                      <li class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
+                        <span>Security {{ ev.labels?.preRenewal || ev.labels?.midYear ? 'Checks' : 'Check' }}</span>
+                      </li>
+                    </ul>
+                    <!-- Tooltip arrow -->
+                    <div class="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800"></div>
+                  </div>
+                </div>
                 <div v-if="ev.labels?.reportDue || ev.labels?.preRenewal || ev.labels?.midYear" class="mt-1.5 flex flex-wrap gap-1.5">
                   <span v-if="ev.labels?.reportDue" class="chip chip-violet">Report</span>
                   <span v-if="ev.labels?.preRenewal" class="chip chip-amber">Pre-renewal</span>
