@@ -72,6 +72,8 @@ export interface FormLog {
   entry?: { email?: string; created_at?: string }
   fields?: Record<string, string>
   run?: { php_version?: string; wp_version?: string; gf_version?: string }
+  notificationRecipient?: string
+  notificationDate?: string
 }
 
 export const STATUS_LIST: MaintStatus[] = [

@@ -65,6 +65,8 @@ export default defineEventHandler(async (event) => {
         form: 1,
         fields: '$fieldsMap',
         run: 1,
+        notificationRecipient: 1,
+        notificationDate: 1,
         entry: {
           email: '$entry.email',
           created_at: {
