@@ -1,5 +1,5 @@
 // server/api/scheduler/overview.get.ts
-import { defineEventHandler, createError } from 'h3'
+import { defineEventHandler } from 'h3'
 import { getDb } from '../../utils/mongo'
 // If you have a helper, prefer it:
 import { requireRole } from '../../utils/session' // or requireAuth if you have one
@@ -41,5 +41,14 @@ export default defineEventHandler(async (event) => {
     })
   )
 
-  return { sites: results }
+  // Get all maintenance items (for the dashboard overview)
+  const maintenanceItems = await db.collection('maintenance')
+    .find({ date: { $gte: cutoff } })
+    .sort({ date: 1 })
+    .toArray()
+
+  return { 
+    sites: results,
+    maintenance: maintenanceItems
+  }
 })

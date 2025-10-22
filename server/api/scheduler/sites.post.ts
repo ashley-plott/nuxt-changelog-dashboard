@@ -1,7 +1,7 @@
 // server/api/scheduler/sites.post.ts
 import { defineEventHandler, readBody, createError } from 'h3'
 import { getDb } from '../../utils/mongo'
-import { addMonths, firstOfMonthUTC, toISODate } from '../../utils/date'
+import { addMonths, firstOfMonthUTC, lastOfMonthUTC, lastWeekdayOfMonthUTC, addMonthsEndOfMonth, toISODate } from '../../utils/date'
 import { requireRole } from '../../utils/session'
 
 type MaintStatus =
@@ -161,19 +161,19 @@ export default defineEventHandler(async (event) => {
     )
   }
 
-  // 1) Two-month cadence anchored at preIdx
-  let cadence = firstOfMonthUTC(windowStart.getUTCFullYear(), preIdx)
-  if (cadence > windowStart) cadence = firstOfMonthUTC(windowStart.getUTCFullYear() - 1, preIdx)
+  // 1) Two-month cadence anchored at preIdx (end of month, weekdays only)
+  let cadence = lastWeekdayOfMonthUTC(windowStart.getUTCFullYear(), preIdx)
+  if (cadence > windowStart) cadence = lastWeekdayOfMonthUTC(windowStart.getUTCFullYear() - 1, preIdx)
 
-  for (let d = cadence; d < stop; d = addMonths(d, 2)) {
+  for (let d = cadence; d < stop; d = addMonthsEndOfMonth(d, 2)) {
     if (d < windowStart) continue
     const m = d.getUTCMonth()
     const labels = { preRenewal: m === preIdx, reportDue: false, midYear: m === midIdx }
     upsertItem(d, 'maintenance', labels)
   }
 
-  // 2) Report months (R−1)
-  for (let d = firstOfMonthUTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth()); d < stop; d = addMonths(d, 1)) {
+  // 2) Report months (R−1) - end of month, weekdays only
+  for (let d = lastWeekdayOfMonthUTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth()); d < stop; d = addMonthsEndOfMonth(d, 1)) {
     if (d.getUTCMonth() !== reportIdx) continue
     const m = d.getUTCMonth()
     const labels = { preRenewal: m === preIdx, reportDue: true, midYear: m === midIdx }

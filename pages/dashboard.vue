@@ -20,6 +20,17 @@ const tab = ref<'overview'|'months'|'sites'>('overview')
 const q = ref(''); const sortBy = ref<'az'|'renew-asc'|'renew-desc'>('az')
 const envFilter = ref<'all'|'production'|'staging'|'dev'|'test'>('all')
 
+// Bulk rebuild state
+const showBulkRebuild = ref(false)
+const bulkRebuilding = ref(false)
+const bulkRebuildForm = reactive({
+  backfillMonths: 12,
+  forwardMonths: 14,
+  confirmText: ''
+})
+const bulkRebuildResult = ref<any>(null)
+const bulkRebuildError = ref<string | null>(null)
+
 function ordinal(n: number) { const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]) }
 function formatRenew(d?: string|number|Date) {
   if (!d) return '—'
@@ -58,6 +69,42 @@ const filtered = computed(() => {
   return list
 })
 
+// Filter maintenance items to only show non-completed ones due this month and organize by type
+const incompleteMaintenance = computed(() => {
+  const now = new Date()
+  const currentYear = now.getUTCFullYear()
+  const currentMonth = now.getUTCMonth()
+  
+  const incomplete = maintenance.value.filter(item => {
+    if (item.status === 'Completed') return false
+    
+    // Check if item is due this month
+    const itemDate = new Date(item.date)
+    return itemDate.getUTCFullYear() === currentYear && itemDate.getUTCMonth() === currentMonth
+  })
+  
+  const preRenewal = incomplete.filter(item => item.labels?.preRenewal)
+  const midYear = incomplete.filter(item => item.labels?.midYear)
+  const quickCheck = incomplete.filter(item => !item.labels?.preRenewal && !item.labels?.midYear)
+  
+  return {
+    preRenewal,
+    midYear,
+    quickCheck
+  }
+})
+
+// Accordion state
+const accordionOpen = ref({
+  preRenewal: true,
+  midYear: true,
+  quickCheck: true
+})
+
+function toggleAccordion(section: keyof typeof accordionOpen.value) {
+  accordionOpen.value[section] = !accordionOpen.value[section]
+}
+
 const now = new Date(); const startMonthIdx = now.getUTCMonth(); const startYear = now.getUTCFullYear()
 const idx = (m:number) => (Number(m||0)-1+12)%12
 const preIdxOf = (m:number) => (idx(m)-2+12)%12
@@ -78,7 +125,12 @@ const monthsOverview = computed<MonthOverview[]>(() => {
       const inMonth = maintenance.value.filter(it => {
         const d = new Date(it.date); return d.getUTCFullYear() === year && d.getUTCMonth() === monthIdx && it.status !== 'Completed'
       })
-      const maintList = inMonth.filter(it => it.kind === 'maintenance').map(it => ({ ...it.site, ...(it.labels||{}), status: it.status }))
+      const maintList = inMonth.filter(it => it.kind === 'maintenance').map(it => ({ 
+        ...it.site, 
+        ...(it.labels||{}), 
+        status: it.status,
+        typeLabel: it.labels?.preRenewal ? 'Pre-Renewal' : it.labels?.midYear ? 'Mid-Year' : 'Quick Check'
+      }))
       const reportList = inMonth.filter(it => it.kind === 'report').map(it => ({ ...it.site, status: it.status }))
       const renewals = (data.value?.sites || []).filter((s: any) => Number(s.renewMonth) === monthIdx + 1)
       out.push({ key: `${year}-${monthIdx}`, label, year, monthIdx, renewals, maintenance: maintList, reports: reportList })
@@ -97,10 +149,48 @@ const sendingMail = ref(false); const mailMsg = ref<string|null>(null); const ma
 async function sendMonthlySummary() {
   sendingMail.value = true; mailMsg.value = mailErr.value = null
   try {
-    const res:any = await $fetch('/api/mail/summary', { method: 'POST' })
-    mailMsg.value = `Sent. Reports: ${res?.counts?.reports ?? 0}, Maintenance: ${res?.counts?.maintenance ?? 0}`
+    await $fetch('/api/mail/summary', { method: 'POST' })
+    mailMsg.value = 'Monthly summary emailed successfully.'
   } catch (e:any) { mailErr.value = e?.data?.message || e?.message || 'Failed to send email' }
   finally { sendingMail.value = false }
+}
+
+async function bulkRebuildMaintenance() {
+  if (bulkRebuildForm.confirmText !== 'REBUILD ALL SITES') {
+    bulkRebuildError.value = 'Please type "REBUILD ALL SITES" to confirm'
+    return
+  }
+  
+  bulkRebuilding.value = true
+  bulkRebuildError.value = null
+  bulkRebuildResult.value = null
+  
+  try {
+    const result = await $fetch('/api/scheduler/bulk-rebuild', {
+      method: 'POST',
+      body: {
+        backfillMonths: bulkRebuildForm.backfillMonths,
+        forwardMonths: bulkRebuildForm.forwardMonths,
+        confirmText: bulkRebuildForm.confirmText
+      }
+    })
+    bulkRebuildResult.value = result
+    // Reset form
+    bulkRebuildForm.confirmText = ''
+    // Refresh data
+    await refresh()
+  } catch (e: any) {
+    bulkRebuildError.value = e?.data?.message || e?.message || 'Failed to rebuild maintenance schedules'
+  } finally {
+    bulkRebuilding.value = false
+  }
+}
+
+function closeBulkRebuild() {
+  showBulkRebuild.value = false
+  bulkRebuildForm.confirmText = ''
+  bulkRebuildError.value = null
+  bulkRebuildResult.value = null
 }
 
 type PingRes = { ok: boolean; finalUrl?: string; status?: number; statusText?: string; timeMs?: number; hasMaintainClass?: boolean; error?: string }
@@ -150,6 +240,7 @@ const envBadge = (env?: string) => {
               <span class="hidden sm:inline">Refresh</span>
             </button>
             <button @click="sendMonthlySummary" class="btn-secondary hidden sm:inline-flex" :disabled="sendingMail">{{ sendingMail ? 'Sending…' : 'Email summary' }}</button>
+            <button @click="showBulkRebuild = true" class="btn-secondary text-orange-700 hover:bg-orange-50 hidden sm:inline-flex">Bulk Rebuild</button>
             <NuxtLink to="/sites" class="btn-primary">Add Site</NuxtLink>
           </div>
         </div>
@@ -174,20 +265,105 @@ const envBadge = (env?: string) => {
       <template v-else>
         <div v-show="tab==='overview'" class="space-y-6">
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="kpi-card"><div class="kpi-label">Maintenance this month</div><div class="kpi-value">{{ thisMonth?.maintenance.length || 0 }}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Maintenance this month</div><div class="kpi-value">{{ incompleteMaintenance.preRenewal.length + incompleteMaintenance.midYear.length + incompleteMaintenance.quickCheck.length }}</div></div>
             <div class="kpi-card"><div class="kpi-label">Reports due</div><div class="kpi-value">{{ thisMonth?.reports.length || 0 }}</div></div>
             <div class="kpi-card"><div class="kpi-label">Renewals this month</div><div class="kpi-value">{{ thisMonth?.renewals.length || 0 }}</div></div>
             <div class="kpi-card"><div class="kpi-label">Total sites</div><div class="kpi-value">{{ sites.length }}</div></div>
           </div>
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-            <div class="card space-y-3 lg:col-span-1"><h2 class="font-semibold text-slate-800">Maintenance this month</h2><NuxtLink v-for="s in thisMonth.maintenance" :key="s.id" :to="`/site/${s.id}`" class="overview-item"><div class="overview-item-main"><p class="font-medium text-slate-800 truncate">{{ s.name || s.id }}</p></div><div class="flex gap-2 text-xs"><span v-if="s.status" :class="statusClass(s.status)">{{ s.status }}</span><span v-else><span v-if="s.preRenewal" class="chip chip-amber">Pre-renewal</span><span v-if="s.midYear" class="chip chip-blue">Mid-year</span></span></div></NuxtLink><p v-if="!thisMonth.maintenance.length" class="text-sm text-slate-500">No maintenance scheduled.</p></div>
-            <div class="card space-y-3 lg:col-span-1"><h2 class="font-semibold text-slate-800">Reports due this month</h2><NuxtLink v-for="s in thisMonth.reports" :key="s.id" :to="`/site/${s.id}`" class="overview-item"><div class="overview-item-main"><p class="font-medium text-slate-800 truncate">{{ s.name || s.id }}</p></div><span class="chip chip-violet">Report</span></NuxtLink><p v-if="!thisMonth.reports.length" class="text-sm text-slate-500">No reports due.</p></div>
-            <div class="card space-y-3 lg:col-span-1"><h2 class="font-semibold text-slate-800">Renewals this month</h2><NuxtLink v-for="s in thisMonth.renewals" :key="s.id" :to="`/site/${s.id}`" class="overview-item"><div class="overview-item-main"><p class="font-medium text-slate-800 truncate">{{ s.name || s.id }}</p></div><span class="text-sm text-slate-600">{{ monthName(s.renewMonth) }}</span></NuxtLink><p v-if="!thisMonth.renewals.length" class="text-sm text-slate-500">No renewals this month.</p></div>
+
+          <!-- Maintenance Accordion -->
+          <div class="card space-y-4">
+            <h2 class="font-semibold text-slate-800">Maintenance Due This Month</h2>
+            
+            <!-- Pre-Renewal Maintenance -->
+            <div class="border border-slate-200 rounded-lg overflow-hidden">
+              <button @click="toggleAccordion('preRenewal')" class="accordion-header w-full flex items-center justify-between p-4 bg-amber-50 hover:bg-amber-100 transition-colors">
+                <div class="flex items-center gap-3">
+                  <span class="chip chip-amber">Pre-Renewal</span>
+                  <span class="font-medium text-slate-800">{{ incompleteMaintenance.preRenewal.length }} items</span>
+                </div>
+                <svg :class="{'rotate-180': accordionOpen.preRenewal}" class="w-5 h-5 text-slate-600 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div v-if="accordionOpen.preRenewal" class="accordion-content p-4 space-y-2">
+                <NuxtLink v-for="item in incompleteMaintenance.preRenewal" :key="`${item.site.id}-${item.date}`" :to="`/site/${item.site.id}`" class="overview-item">
+                  <div class="overview-item-main">
+                    <p class="font-medium text-slate-800 truncate">{{ item.site.name || item.site.id }}</p>
+                    <p class="text-sm text-slate-500">{{ new Date(item.date).toLocaleDateString() }}</p>
+                  </div>
+                  <div class="flex gap-2 text-xs">
+                    <span v-if="item.status" :class="statusClass(item.status)">{{ item.status }}</span>
+                    <span :class="envBadge(item.site.env)">{{ item.site.env }}</span>
+                  </div>
+                </NuxtLink>
+                <p v-if="!incompleteMaintenance.preRenewal.length" class="text-sm text-slate-500 py-2">No pre-renewal maintenance pending.</p>
+              </div>
+            </div>
+
+            <!-- Mid-Year Maintenance -->
+            <div class="border border-slate-200 rounded-lg overflow-hidden">
+              <button @click="toggleAccordion('midYear')" class="accordion-header w-full flex items-center justify-between p-4 bg-blue-50 hover:bg-blue-100 transition-colors">
+                <div class="flex items-center gap-3">
+                  <span class="chip chip-blue">Mid-Year</span>
+                  <span class="font-medium text-slate-800">{{ incompleteMaintenance.midYear.length }} items</span>
+                </div>
+                <svg :class="{'rotate-180': accordionOpen.midYear}" class="w-5 h-5 text-slate-600 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div v-if="accordionOpen.midYear" class="accordion-content p-4 space-y-2">
+                <NuxtLink v-for="item in incompleteMaintenance.midYear" :key="`${item.site.id}-${item.date}`" :to="`/site/${item.site.id}`" class="overview-item">
+                  <div class="overview-item-main">
+                    <p class="font-medium text-slate-800 truncate">{{ item.site.name || item.site.id }}</p>
+                    <p class="text-sm text-slate-500">{{ new Date(item.date).toLocaleDateString() }}</p>
+                  </div>
+                  <div class="flex gap-2 text-xs">
+                    <span v-if="item.status" :class="statusClass(item.status)">{{ item.status }}</span>
+                    <span :class="envBadge(item.site.env)">{{ item.site.env }}</span>
+                  </div>
+                </NuxtLink>
+                <p v-if="!incompleteMaintenance.midYear.length" class="text-sm text-slate-500 py-2">No mid-year maintenance pending.</p>
+              </div>
+            </div>
+
+            <!-- Quick Check Maintenance -->
+            <div class="border border-slate-200 rounded-lg overflow-hidden">
+              <button @click="toggleAccordion('quickCheck')" class="accordion-header w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition-colors">
+                <div class="flex items-center gap-3">
+                  <span class="chip chip-slate">Quick Check</span>
+                  <span class="font-medium text-slate-800">{{ incompleteMaintenance.quickCheck.length }} items</span>
+                </div>
+                <svg :class="{'rotate-180': accordionOpen.quickCheck}" class="w-5 h-5 text-slate-600 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div v-if="accordionOpen.quickCheck" class="accordion-content p-4 space-y-2">
+                <NuxtLink v-for="item in incompleteMaintenance.quickCheck" :key="`${item.site.id}-${item.date}`" :to="`/site/${item.site.id}`" class="overview-item">
+                  <div class="overview-item-main">
+                    <p class="font-medium text-slate-800 truncate">{{ item.site.name || item.site.id }}</p>
+                    <p class="text-sm text-slate-500">{{ new Date(item.date).toLocaleDateString() }}</p>
+                  </div>
+                  <div class="flex gap-2 text-xs">
+                    <span v-if="item.status" :class="statusClass(item.status)">{{ item.status }}</span>
+                    <span :class="envBadge(item.site.env)">{{ item.site.env }}</span>
+                  </div>
+                </NuxtLink>
+                <p v-if="!incompleteMaintenance.quickCheck.length" class="text-sm text-slate-500 py-2">No quick check maintenance pending.</p>
+              </div>
+            </div>
+
+            <p v-if="!incompleteMaintenance.preRenewal.length && !incompleteMaintenance.midYear.length && !incompleteMaintenance.quickCheck.length" class="text-center text-slate-500 py-8">🎉 All maintenance for this month has been completed!</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="card space-y-3"><h2 class="font-semibold text-slate-800">Reports due this month</h2><NuxtLink v-for="s in thisMonth.reports" :key="s.id" :to="`/site/${s.id}`" class="overview-item"><div class="overview-item-main"><p class="font-medium text-slate-800 truncate">{{ s.name || s.id }}</p></div><span class="chip chip-violet">Report</span></NuxtLink><p v-if="!thisMonth.reports.length" class="text-sm text-slate-500">No reports due.</p></div>
+            <div class="card space-y-3"><h2 class="font-semibold text-slate-800">Renewals this month</h2><NuxtLink v-for="s in thisMonth.renewals" :key="s.id" :to="`/site/${s.id}`" class="overview-item"><div class="overview-item-main"><p class="font-medium text-slate-800 truncate">{{ s.name || s.id }}</p></div><span class="text-sm text-slate-600">{{ monthName(s.renewMonth) }}</span></NuxtLink><p v-if="!thisMonth.renewals.length" class="text-sm text-slate-500">No renewals this month.</p></div>
           </div>
         </div>
         <div v-show="tab==='months'" class="space-y-4">
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            <div v-for="m in monthsOverview" :key="m.key" class="card"><h3 class="text-lg font-semibold text-slate-800 border-b border-slate-200 pb-3 mb-3">{{ m.label }}</h3><div class="space-y-4 text-sm"><div class="space-y-1"><h4 class="font-semibold text-slate-600">Maintenance <span class="count-badge">{{ m.maintenance.length }}</span></h4><div v-if="m.maintenance.length" class="space-y-1"><NuxtLink v-for="s in m.maintenance" :key="s.id" :to="`/site/${s.id}`" class="month-item"><span class="truncate">{{ s.name || s.id }}</span><div class="flex gap-2 text-[11px]"><span v-if="s.status" :class="statusClass(s.status)">{{ s.status }}</span><span v-else class="flex gap-1"><span v-if="s.preRenewal" class="chip chip-amber !px-1.5 !py-0.5">Pre</span><span v-if="s.midYear" class="chip chip-blue !px-1.5 !py-0.5">Mid</span></span></div></NuxtLink></div><p v-else class="text-xs text-slate-500 px-1.5">None</p></div><hr class="border-slate-200/60" /><div class="space-y-1"><h4 class="font-semibold text-slate-600">Reports <span class="count-badge">{{ m.reports.length }}</span></h4><div v-if="m.reports.length" class="space-y-1"><NuxtLink v-for="s in m.reports" :key="s.id" :to="`/site/${s.id}`" class="month-item"><span class="truncate">{{ s.name || s.id }}</span><span class="chip chip-violet">Report</span></NuxtLink></div><p v-else class="text-xs text-slate-500 px-1.5">None</p></div><hr class="border-slate-200/60" /><div class="space-y-1"><h4 class="font-semibold text-slate-600">Renewals <span class="count-badge">{{ m.renewals.length }}</span></h4><div v-if="m.renewals.length" class="space-y-1"><NuxtLink v-for="s in m.renewals" :key="s.id" :to="`/site/${s.id}`" class="month-item"><span class="truncate">{{ s.name || s.id }}</span></NuxtLink></div><p v-else class="text-xs text-slate-500 px-1.5">None</p></div></div></div>
+            <div v-for="m in monthsOverview" :key="m.key" class="card"><h3 class="text-lg font-semibold text-slate-800 border-b border-slate-200 pb-3 mb-3">{{ m.label }}</h3><div class="space-y-4 text-sm"><div class="space-y-1"><h4 class="font-semibold text-slate-600">Outstanding Maintenance <span class="count-badge">{{ m.maintenance.length }}</span></h4><div v-if="m.maintenance.length" class="space-y-1"><NuxtLink v-for="s in m.maintenance" :key="s.id" :to="`/site/${s.id}`" class="month-item"><div class="min-w-0 flex-1"><span class="block truncate font-medium">{{ s.name || s.id }}</span><span class="text-xs text-slate-500">{{ s.typeLabel || 'Quick Check' }}</span></div><div class="flex gap-2 text-[11px]"><span v-if="s.status" :class="statusClass(s.status)">{{ s.status }}</span><span v-else class="flex gap-1"><span v-if="s.preRenewal" class="chip chip-amber !px-1.5 !py-0.5">Pre</span><span v-if="s.midYear" class="chip chip-blue !px-1.5 !py-0.5">Mid</span><span v-if="!s.preRenewal && !s.midYear" class="chip chip-slate !px-1.5 !py-0.5">Quick</span></span></div></NuxtLink></div><p v-else class="text-xs text-slate-500 px-1.5">None outstanding</p></div><hr class="border-slate-200/60" /><div class="space-y-1"><h4 class="font-semibold text-slate-600">Reports <span class="count-badge">{{ m.reports.length }}</span></h4><div v-if="m.reports.length" class="space-y-1"><NuxtLink v-for="s in m.reports" :key="s.id" :to="`/site/${s.id}`" class="month-item"><span class="truncate">{{ s.name || s.id }}</span><span class="chip chip-violet">Report</span></NuxtLink></div><p v-else class="text-xs text-slate-500 px-1.5">None</p></div><hr class="border-slate-200/60" /><div class="space-y-1"><h4 class="font-semibold text-slate-600">Renewals <span class="count-badge">{{ m.renewals.length }}</span></h4><div v-if="m.renewals.length" class="space-y-1"><NuxtLink v-for="s in m.renewals" :key="s.id" :to="`/site/${s.id}`" class="month-item"><span class="truncate">{{ s.name || s.id }}</span></NuxtLink></div><p v-else class="text-xs text-slate-500 px-1.5">None</p></div></div></div>
           </div>
         </div>
         <div v-show="tab==='sites'" class="space-y-6">
@@ -200,6 +376,71 @@ const envBadge = (env?: string) => {
         <div class="card"><h2 class="font-semibold text-slate-800 mb-2">Maintenance Mode Ping Test</h2><div class="flex flex-col sm:flex-row items-center gap-2"><input v-model="testUrl" type="url" placeholder="https://example.com" class="filter-input flex-1 w-full" /><button @click="testPing" class="btn-primary w-full sm:w-auto" :disabled="testing || !testUrl">{{ testing ? 'Pinging…' : 'Test URL' }}</button></div><div class="mt-2 text-sm min-h-[1.25rem]"><p v-if="testMsg" class="text-emerald-700" v-html="testMsg"></p><p v-if="testErr" class="text-red-600">{{ testErr }}</p><div v-if="testRes" class="text-xs text-slate-500 mt-1 space-y-0.5"><p>Final URL: <code class="text-slate-700">{{ testRes.finalUrl || '—' }}</code></p><p>Status: <code class="text-slate-700">{{ testRes.status || '—' }} {{ testRes.statusText || '' }}</code></p><p>Time: <code class="text-slate-700">{{ testRes.timeMs }}ms</code></p></div></div></div>
       </template>
     </main>
+
+    <!-- Bulk Rebuild Modal -->
+    <div v-if="showBulkRebuild" class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+      <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="closeBulkRebuild"></div>
+        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+          <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+            <div class="sm:flex sm:items-start">
+              <div class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                <svg class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                  Bulk Rebuild All Maintenance Schedules
+                </h3>
+                <div class="mt-2">
+                  <p class="text-sm text-gray-500">
+                    This will <strong>delete all existing maintenance items</strong> for all sites and regenerate them with end-of-month, weekday-only dates.
+                  </p>
+                  
+                  <div class="mt-4 space-y-4">
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="block text-sm font-medium text-gray-700">Backfill months</label>
+                        <input v-model.number="bulkRebuildForm.backfillMonths" type="number" min="0" max="60" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm" />
+                      </div>
+                      <div>
+                        <label class="block text-sm font-medium text-gray-700">Forward months</label>
+                        <input v-model.number="bulkRebuildForm.forwardMonths" type="number" min="0" max="60" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm" />
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700">Type "REBUILD ALL SITES" to confirm</label>
+                      <input v-model="bulkRebuildForm.confirmText" type="text" placeholder="REBUILD ALL SITES" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 sm:text-sm" />
+                    </div>
+                  </div>
+
+                  <div v-if="bulkRebuildError" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-sm text-red-600">{{ bulkRebuildError }}</p>
+                  </div>
+
+                  <div v-if="bulkRebuildResult" class="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-sm text-green-600 font-medium">✅ Bulk rebuild completed!</p>
+                    <p class="text-xs text-green-600 mt-1">
+                      {{ bulkRebuildResult.totalSites }} sites • {{ bulkRebuildResult.totalDeleted }} deleted • {{ bulkRebuildResult.totalCreated }} created
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+            <button @click="bulkRebuildMaintenance" :disabled="bulkRebuilding || bulkRebuildForm.confirmText !== 'REBUILD ALL SITES'" type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              {{ bulkRebuilding ? 'Rebuilding...' : 'Rebuild All Sites' }}
+            </button>
+            <button @click="closeBulkRebuild" type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -222,4 +463,7 @@ const envBadge = (env?: string) => {
 .chip-violet { @apply bg-violet-100 text-violet-800 border-violet-200/80; }
 .chip-amber { @apply bg-amber-100 text-amber-800 border-amber-200/80; }
 .chip-blue { @apply bg-blue-100 text-blue-800 border-blue-200/80; }
+.chip-slate { @apply bg-slate-100 text-slate-800 border-slate-200/80; }
+.accordion-header { @apply text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2; }
+.accordion-content { @apply bg-white border-t border-slate-200; }
 </style>

@@ -88,6 +88,10 @@ export const STATUS_LIST: MaintStatus[] = [
 export function firstOfMonthUTC(d = new Date()) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
 }
+export function lastOfMonthUTC(d = new Date()) {
+  // Create date at first of next month, then subtract 1 day
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
+}
 export function formatMonth(d: Date) {
   return d.toLocaleString(undefined, { month: 'long', year: 'numeric' })
 }
