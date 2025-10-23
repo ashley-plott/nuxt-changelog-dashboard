@@ -10,9 +10,10 @@ import ChangelogPanel from '~/components/site/ChangelogPanel.vue'
 import FormsPanel from '~/components/site/FormsPanel.vue'
 import NotesPanel from '~/components/site/NotesPanel.vue'
 import DetailsPanel from '~/components/site/DetailsPanel.vue'
+import SecurityPanel from '~/components/site/SecurityPanel.vue'
 import '~/assets/site.css'
 
-import { CalendarIcon, DocumentTextIcon, ClipboardDocumentListIcon, PencilSquareIcon, InformationCircleIcon } from '@heroicons/vue/20/solid'
+import { CalendarIcon, DocumentTextIcon, ClipboardDocumentListIcon, PencilSquareIcon, InformationCircleIcon, ShieldCheckIcon } from '@heroicons/vue/20/solid'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +44,7 @@ const TABS: { key: TabKey, label: string }[] = [
   { key: 'changelog', label: 'Changelog' },
   { key: 'forms', label: 'Forms' },
   { key: 'notes', label: 'Notes' },
+  { key: 'security', label: 'Security' },
   { key: 'details', label: 'Details' },
 ]
 const tab = ref<TabKey>('calendar')
@@ -82,14 +84,14 @@ function handleKeydown(e: KeyboardEvent){
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
   if (e.key.toLowerCase() === 'g') { startChord(); return }
   if (chord.waiting) {
-    const m: Record<string, TabKey> = { c:'calendar', l:'changelog', f:'forms', n:'notes', d:'details' }
+    const m: Record<string, TabKey> = { c:'calendar', l:'changelog', f:'forms', n:'notes', s:'security', d:'details' }
     const k = m[e.key.toLowerCase()]; if (k) { tab.value = k; e.preventDefault() }
     chord.waiting = false; return
   }
   if (e.key === 'r') { refreshSite(); e.preventDefault(); }
   if (e.key === 'e') { tab.value = 'details'; e.preventDefault(); }
-  if (e.key >= '1' && e.key <= '5') {
-    const map: Record<string, TabKey> = { '1':'calendar','2':'changelog','3':'forms','4':'notes','5':'details' }
+  if (e.key >= '1' && e.key <= '6') {
+    const map: Record<string, TabKey> = { '1':'calendar','2':'changelog','3':'forms','4':'notes','5':'security','6':'details' }
     tab.value = map[e.key]; e.preventDefault()
   }
 }
@@ -201,6 +203,7 @@ function copyToClipboard(text: string){
               <TabButton label="Changelog" :active="tab==='changelog'" @click="selectTab('changelog')" :count="counts.changelog" :icon="DocumentTextIcon"/>
               <TabButton label="Forms"     :active="tab==='forms'"     @click="selectTab('forms')"     :count="counts.forms"     :icon="ClipboardDocumentListIcon"/>
               <TabButton label="Notes"     :active="tab==='notes'"     @click="selectTab('notes')"     :count="counts.notes"     :icon="PencilSquareIcon"/>
+              <TabButton label="Security"  :active="tab==='security'"  @click="selectTab('security')"  :icon="ShieldCheckIcon"/>
               <TabButton label="Details"   :active="tab==='details'"   @click="selectTab('details')"   :icon="InformationCircleIcon"/>
             </div>
 
@@ -239,6 +242,7 @@ function copyToClipboard(text: string){
       <ChangelogPanel v-show="tab==='changelog'" :site-id="id" :env="site?.env || ''" />
       <FormsPanel v-show="tab==='forms'" :site-id="id" :env="site?.env || ''" />
       <NotesPanel v-show="tab==='notes'" :site-id="id" :env="site?.env" :authed="authed" :my="my" />
+      <SecurityPanel v-show="tab==='security'" :site-id="id" :site-url="displayWebsiteUrl" :can-manage-site="canManageSite" />
       <DetailsPanel v-show="tab==='details'" :id="id" :site="site" :can-manage-site="canManageSite" @saved="refreshSite" @deleted="(to)=>router.push(to)" />
     </div>
   </div>

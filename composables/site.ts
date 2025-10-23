@@ -1,5 +1,5 @@
 // Shared types + helpers used across panels
-export type TabKey = 'calendar' | 'changelog' | 'forms' | 'notes' | 'details'
+export type TabKey = 'calendar' | 'changelog' | 'forms' | 'notes' | 'details' | 'security'
 
 export type MaintStatus =
   | 'To-Do'
