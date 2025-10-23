@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch, watchEffect } from 'vue'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch, watchEffect, defineAsyncComponent, Suspense } from 'vue'
 import { useRoute, useRouter, useFetch, useRequestHeaders } from '#imports'
 import type { SiteDoc, MaintItem, TabKey, MaintStatus, PrimaryContact } from '~/composables/site'
 import { STATUS_LIST } from '~/composables/site'
@@ -10,7 +10,8 @@ import ChangelogPanel from '~/components/site/ChangelogPanel.vue'
 import FormsPanel from '~/components/site/FormsPanel.vue'
 import NotesPanel from '~/components/site/NotesPanel.vue'
 import DetailsPanel from '~/components/site/DetailsPanel.vue'
-import SecurityPanel from '~/components/site/SecurityPanel.vue'
+// Lazy-load SecurityPanel to reduce initial bundle size
+const SecurityPanel = defineAsyncComponent(() => import('~/components/site/SecurityPanel.vue'))
 import '~/assets/site.css'
 
 import { CalendarIcon, DocumentTextIcon, ClipboardDocumentListIcon, PencilSquareIcon, InformationCircleIcon, ShieldCheckIcon } from '@heroicons/vue/20/solid'
@@ -242,7 +243,17 @@ function copyToClipboard(text: string){
       <ChangelogPanel v-show="tab==='changelog'" :site-id="id" :env="site?.env || ''" />
       <FormsPanel v-show="tab==='forms'" :site-id="id" :env="site?.env || ''" />
       <NotesPanel v-show="tab==='notes'" :site-id="id" :env="site?.env" :authed="authed" :my="my" />
-      <SecurityPanel v-show="tab==='security'" :site-id="id" :site-url="displayWebsiteUrl" :can-manage-site="canManageSite" />
+      <Suspense v-if="tab === 'security'">
+        <SecurityPanel :site-id="id" :site-url="displayWebsiteUrl" :can-manage-site="canManageSite" />
+        <template #fallback>
+          <div class="rounded-2xl border bg-white p-6 shadow-sm">
+            <div class="animate-pulse space-y-4">
+              <div class="h-4 w-48 bg-slate-200 rounded"></div>
+              <div class="h-32 bg-slate-100 rounded-lg"></div>
+            </div>
+          </div>
+        </template>
+      </Suspense>
       <DetailsPanel v-show="tab==='details'" :id="id" :site="site" :can-manage-site="canManageSite" @saved="refreshSite" @deleted="(to)=>router.push(to)" />
     </div>
   </div>

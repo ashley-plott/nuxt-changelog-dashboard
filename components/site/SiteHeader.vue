@@ -26,14 +26,11 @@ const siteHostname = computed(() => {
   try { return props.displayWebsiteUrl ? new URL(props.displayWebsiteUrl).hostname : '' } catch { return '' }
 })
 
-// Favicon fallback logic
-const favPrimary  = computed(() => siteHostname.value ? `https://www.google.com/s2/favicons?sz=64&domain=${siteHostname.value}` : '')
-const favFallback = computed(() => siteHostname.value ? `https://icons.duckduckgo.com/ip3/${siteHostname.value}.ico` : '')
-const favTriedFallback = ref(false)
+// Self-hosted favicon logic
+const faviconUrl = computed(() => siteHostname.value ? `/api/favicon/${siteHostname.value}` : '')
 const favHide = ref(false)
 function onFavError(){
-  if(!favTriedFallback.value) favTriedFallback.value = true
-  else favHide.value = true
+  favHide.value = true
 }
 
 // Popover State Management  
@@ -76,7 +73,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex flex-col sm:flex-row items-start gap-4 sm:gap-6 bg-slate-50 p-4 sm:p-6 rounded-2xl">
     <div class="flex-shrink-0 relative h-16 w-16 rounded-2xl overflow-hidden shadow-md ring-1 ring-black/5 bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
-      <img v-if="siteHostname && !favHide" :src="favTriedFallback ? favFallback : favPrimary" @error="onFavError" :alt="site?.name || 'Site Favicon'" class="h-9 w-9 object-contain" decoding="async" loading="eager" />
+      <img v-if="siteHostname && !favHide" :src="faviconUrl" @error="onFavError" :alt="site?.name || 'Site Favicon'" class="h-9 w-9 object-contain" decoding="async" loading="lazy" fetchpriority="low" width="36" height="36" />
       <span v-else class="text-xl font-bold text-slate-600">{{ siteInitial }}</span>
       <span class="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/60"></span>
     </div>

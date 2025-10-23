@@ -1,5 +1,7 @@
 /* shared utility classes extracted from <style scoped> */
-* { transition: background-color .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease; }
+/* Avoid global transitions (costly). Provide opt-in utility classes for common transitions. */
+.ui-transition { transition-property: background-color,color,border-color,box-shadow; transition-duration: 200ms; transition-timing-function: ease; }
+.ui-fade { transition: opacity 150ms ease; }
 .label { @apply block text-xs font-medium text-gray-600 mb-1; }
 .input { @apply w-full rounded-lg border px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10; }
 .btn { @apply rounded-lg border px-4 py-2 text-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10; }

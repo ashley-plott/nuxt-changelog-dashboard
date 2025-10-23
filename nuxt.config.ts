@@ -6,11 +6,7 @@ export default defineNuxtConfig({
   routeRules: {
     '/api/**': { runtime: 'nodejs' }
   },
-  app:{
-    head: {
-      title: 'PLOTT Maintenance'
-    }
-  },
+  // app head + performance hints
    runtimeConfig: {
     POSTMARK_TOKEN: process.env.POSTMARK_TOKEN,
     POSTMARK_MESSAGE_STREAM: process.env.POSTMARK_MESSAGE_STREAM || 'outbound',
@@ -19,11 +15,17 @@ export default defineNuxtConfig({
     ciWebhookToken: process.env.CI_WEBHOOK_TOKEN,
   },
   devtools: {
-    enabled: true,
-
+    // Only enable devtools in non-production environments
+    enabled: process.env.NODE_ENV !== 'production',
     timeline: {
-      enabled: true
+      enabled: process.env.NODE_ENV !== 'production'
     }
   },
-  debug: true
+  // Turn off debug by default for production
+  debug: process.env.NODE_ENV !== 'production',
+  app: {
+    head: {
+      title: 'PLOTT Maintenance'
+    }
+  },
 })
