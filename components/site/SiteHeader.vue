@@ -4,7 +4,7 @@ import { CodeBracketIcon } from '@heroicons/vue/24/outline';
 import { ArrowPathIcon, EnvelopeIcon, PhoneIcon } from '@heroicons/vue/20/solid';
 import { ClipboardDocumentIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
-import type { SiteDoc, PrimaryContact } from '~/composables/site'
+import type { SiteDoc, PrimaryContact, Contact } from '~/composables/site'
 import { EllipsisVerticalIcon } from '@heroicons/vue/20/solid';
 import { ArrowLeftIcon } from '@heroicons/vue/20/solid';
 
@@ -36,7 +36,9 @@ function onFavError(){
   else favHide.value = true
 }
 
-// Popover State Management
+// Popover State Management  
+const allContacts = computed(() => props.site?.contacts || [])
+const hasContacts = computed(() => allContacts.value.length > 0)
 const displayContact = computed<PrimaryContact | null>(() => props.site?.primaryContact || null)
 const isContactOpen = ref(false)
 const isActionMenuOpen = ref(false) // State for new mobile action menu
@@ -103,25 +105,45 @@ onBeforeUnmount(() => {
         <span v-if="site" class="meta-tag"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>{{ site.env }}</span>
         <span v-if="site" class="meta-tag" :title="`Renews in ${renewMonthName}`"> <ArrowPathIcon class="w-4 h-4" /> Renew: {{ renewMonthName }}</span>
         <a v-if="latestCi?.run?.ci_url" :href="latestCi.run.ci_url" target="_blank" :class="['meta-tag', (latestCi.status||'').toLowerCase().includes('succ') || (latestCi.status||'').toLowerCase().includes('pass') ? 'ci-success' : (latestCi.status||'').toLowerCase().includes('fail') ? 'ci-failure' : (latestCi.status||'').toLowerCase().includes('run') ? 'ci-running' : '']">CI: {{ latestCi.status }}</a>
-        <div v-if="displayContact" class="relative" data-popover-root>
+        <div v-if="hasContacts" class="relative" data-popover-root>
           <button @click="toggleContactPopover" class="meta-tag">
             <EnvelopeIcon class="w-4 h-4" />
-            Contact
+            Contacts ({{ allContacts.length }})
           </button>
           <Transition enter-active-class="transition ease-out duration-100" enter-from-class="transform opacity-0 scale-95" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-75" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
-            <div v-if="isContactOpen" class="absolute mt-2 w-72 rounded-xl bg-white shadow-lg ring-1 ring-black/5 p-4 z-10">
-              <h4 class="font-semibold text-slate-800">Primary Contact</h4>
-              <p class="text-sm text-slate-500 mb-4">{{ displayContact?.name || '—' }}</p>
-              <div class="space-y-2 text-sm">
-                <div v-if="displayContact?.email" class="flex items-center gap-2">
-                  <EnvelopeIcon class="w-4 h-4" />
-                  <a :href="`mailto:${displayContact.email}`" class="truncate text-slate-600 hover:text-slate-900">{{ displayContact.email }}</a>
-                  <button class="ml-auto copy-btn" @click.stop="emit('copy', displayContact!.email!)">Copy</button>
+            <div v-if="isContactOpen" class="contact-popover absolute mt-2 w-80 rounded-xl bg-white shadow-lg ring-1 ring-black/5 p-4 z-10 max-h-96 overflow-y-auto">
+              <h4 class="font-semibold text-slate-800 mb-4">All Contacts</h4>
+              <div class="space-y-4">
+                <div v-for="(contact, index) in allContacts" :key="index" class="border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
+                  <h5 class="font-medium text-slate-800">{{ contact.name || `Contact ${index + 1}` }}</h5>
+                  <p v-if="contact.title" class="text-xs text-slate-500 mb-2">{{ contact.title }}</p>
+                  
+                  <div class="space-y-2 text-sm">
+                    <div v-for="email in contact.emails" :key="email" class="flex items-center gap-2">
+                      <EnvelopeIcon class="w-4 h-4 text-slate-400" />
+                      <a :href="`mailto:${email}`" class="truncate text-slate-600 hover:text-slate-900 flex-1">{{ email }}</a>
+                      <button class="copy-btn" @click.stop="emit('copy', email)">Copy</button>
+                    </div>
+                    <div v-for="phone in contact.phones" :key="phone" class="flex items-center gap-2">
+                      <PhoneIcon class="w-4 h-4 text-slate-400" />
+                      <span class="truncate text-slate-600 flex-1">{{ phone }}</span>
+                      <button class="copy-btn" @click.stop="emit('copy', phone)">Copy</button>
+                    </div>
+                  </div>
+                  
+                  <div v-if="!contact.emails?.length && !contact.phones?.length" class="text-xs text-slate-400 italic">
+                    No contact information available
+                  </div>
                 </div>
-                <div v-if="displayContact?.phone" class="flex items-center gap-2">
-                  <PhoneIcon class="w-4 h-4" />
-                  <span class="truncate text-slate-600">{{ displayContact.phone }}</span>
-                  <button class="ml-auto copy-btn" @click.stop="emit('copy', displayContact!.phone!)">Copy</button>
+              </div>
+              
+              <!-- Group Email if available -->
+              <div v-if="site?.groupEmail" class="mt-4 pt-4 border-t border-slate-100">
+                <h5 class="font-medium text-slate-800 text-sm">Group Email</h5>
+                <div class="flex items-center gap-2 mt-2 text-sm">
+                  <EnvelopeIcon class="w-4 h-4 text-slate-400" />
+                  <a :href="`mailto:${site.groupEmail}`" class="truncate text-slate-600 hover:text-slate-900 flex-1">{{ site.groupEmail }}</a>
+                  <button class="copy-btn" @click.stop="emit('copy', site.groupEmail)">Copy</button>
                 </div>
               </div>
             </div>
@@ -166,7 +188,26 @@ onBeforeUnmount(() => {
 
 .copy-btn {
   @apply rounded-md px-2 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200
-         hover:bg-slate-100 hover:text-slate-900 transition-colors;
+         hover:bg-slate-100 hover:text-slate-900 transition-colors flex-shrink-0;
+}
+
+/* Contact list styling */
+.contact-popover {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) transparent;
+}
+.contact-popover::-webkit-scrollbar {
+  width: 6px;
+}
+.contact-popover::-webkit-scrollbar-track {
+  background: transparent;
+}
+.contact-popover::-webkit-scrollbar-thumb {
+  background: rgb(203 213 225);
+  border-radius: 3px;
+}
+.contact-popover::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184);
 }
 
 .action-link {
