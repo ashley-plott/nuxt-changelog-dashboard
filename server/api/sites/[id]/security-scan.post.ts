@@ -19,6 +19,210 @@ interface SecurityScanResult {
   recommendations: string[]
 }
 
+interface VulnerabilityInfo {
+  package: string
+  version?: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  cve?: string
+  description: string
+  detectedIn: string
+}
+
+interface VulnerabilityAnalysis {
+  summary: {
+    totalPackages: number
+    totalVulnerabilities: number
+    critical: number
+    high: number
+    medium: number
+    low: number
+  }
+  vulnerablePackages: VulnerabilityInfo[]
+  detectionMethods: string[]
+}
+
+// Known vulnerability database (simplified - in production, use a real CVE database)
+const knownVulnerabilities: Record<string, VulnerabilityInfo[]> = {
+  'jquery': [
+    { package: 'jquery', version: '<3.5.0', severity: 'medium', cve: 'CVE-2020-11022', description: 'XSS vulnerability in jQuery', detectedIn: 'script' },
+    { package: 'jquery', version: '<3.4.0', severity: 'medium', cve: 'CVE-2019-11358', description: 'Prototype pollution vulnerability', detectedIn: 'script' }
+  ],
+  'lodash': [
+    { package: 'lodash', version: '<4.17.19', severity: 'high', cve: 'CVE-2020-8203', description: 'Prototype pollution vulnerability', detectedIn: 'script' }
+  ],
+  'bootstrap': [
+    { package: 'bootstrap', version: '<4.1.2', severity: 'medium', cve: 'CVE-2018-14041', description: 'XSS vulnerability in tooltip/popover', detectedIn: 'script' }
+  ],
+  'moment': [
+    { package: 'moment', version: '*', severity: 'low', description: 'Deprecated package with known issues', detectedIn: 'script' }
+  ],
+  'angular': [
+    { package: 'angular', version: '<1.8.0', severity: 'high', cve: 'CVE-2020-7676', description: 'XSS vulnerability in $sanitize', detectedIn: 'script' }
+  ]
+}
+
+async function analyzePackageVulnerabilities(html: string, url: string): Promise<VulnerabilityAnalysis> {
+  const vulnerabilities: VulnerabilityInfo[] = []
+  const detectedPackages = new Set<string>()
+  const detectionMethods: string[] = []
+
+  // Method 1: Analyze script tags for CDN-loaded libraries
+  const scriptMatches = html.match(/<script[^>]*src=["']([^"']+)["'][^>]*>/gi) || []
+  for (const script of scriptMatches) {
+    const srcMatch = script.match(/src=["']([^"']+)["']/)
+    if (srcMatch) {
+      const scriptUrl = srcMatch[1]
+      
+      // Check common CDN patterns
+      const cdnPatterns = [
+        { regex: /\/jquery[.-](\d+(?:\.\d+)*)/i, name: 'jquery' },
+        { regex: /\/lodash[.-](\d+(?:\.\d+)*)/i, name: 'lodash' },
+        { regex: /\/bootstrap[.-](\d+(?:\.\d+)*)/i, name: 'bootstrap' },
+        { regex: /\/moment[.-](\d+(?:\.\d+)*)/i, name: 'moment' },
+        { regex: /\/angular[.-](\d+(?:\.\d+)*)/i, name: 'angular' }
+      ]
+
+      for (const pattern of cdnPatterns) {
+        const match = scriptUrl.match(pattern.regex)
+        if (match) {
+          const version = match[1]
+          const packageName = pattern.name
+          detectedPackages.add(`${packageName}@${version}`)
+          
+          // Check for vulnerabilities
+          const packageVulns = knownVulnerabilities[packageName] || []
+          for (const vuln of packageVulns) {
+            if (isVersionVulnerable(version, vuln.version || '*')) {
+              vulnerabilities.push({
+                ...vuln,
+                version,
+                detectedIn: `CDN script: ${scriptUrl}`
+              })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Method 2: Check inline scripts for library signatures
+  const inlineScripts = html.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi) || []
+  for (const script of inlineScripts) {
+    const content = script.replace(/<\/?script[^>]*>/gi, '')
+    
+    // Look for common library signatures
+    if (content.includes('jQuery') || content.includes('$')) {
+      const jqueryVersion = extractVersionFromContent(content, 'jquery')
+      if (jqueryVersion) {
+        detectedPackages.add(`jquery@${jqueryVersion}`)
+        checkInlineVulnerabilities('jquery', jqueryVersion, vulnerabilities)
+      }
+    }
+    
+    if (content.includes('lodash') || content.includes('_')) {
+      const lodashVersion = extractVersionFromContent(content, 'lodash')
+      if (lodashVersion) {
+        detectedPackages.add(`lodash@${lodashVersion}`)
+        checkInlineVulnerabilities('lodash', lodashVersion, vulnerabilities)
+      }
+    }
+  }
+
+  if (scriptMatches.length > 0) detectionMethods.push('CDN script analysis')
+  if (inlineScripts.length > 0) detectionMethods.push('Inline script analysis')
+
+  // Method 3: Check for package.json or manifest files
+  try {
+    const packageJsonResponse = await fetch(new URL('/package.json', url).href, { 
+      signal: AbortSignal.timeout(3000) 
+    })
+    if (packageJsonResponse.ok) {
+      const packageJson = await packageJsonResponse.json()
+      if (packageJson.dependencies || packageJson.devDependencies) {
+        detectionMethods.push('package.json analysis')
+        const deps = { ...packageJson.dependencies, ...packageJson.devDependencies }
+        for (const [name, version] of Object.entries(deps)) {
+          if (knownVulnerabilities[name]) {
+            const cleanVersion = (version as string).replace(/[\^~]/, '')
+            checkInlineVulnerabilities(name, cleanVersion, vulnerabilities)
+          }
+        }
+      }
+    }
+  } catch {
+    // Package.json not accessible - this is normal
+  }
+
+  const summary = {
+    totalPackages: detectedPackages.size,
+    totalVulnerabilities: vulnerabilities.length,
+    critical: vulnerabilities.filter(v => v.severity === 'critical').length,
+    high: vulnerabilities.filter(v => v.severity === 'high').length,
+    medium: vulnerabilities.filter(v => v.severity === 'medium').length,
+    low: vulnerabilities.filter(v => v.severity === 'low').length
+  }
+
+  return {
+    summary,
+    vulnerablePackages: vulnerabilities,
+    detectionMethods
+  }
+}
+
+function isVersionVulnerable(currentVersion: string, vulnerablePattern: string): boolean {
+  if (vulnerablePattern === '*') return true
+  
+  // Simple version comparison - in production, use semver library
+  if (vulnerablePattern.startsWith('<')) {
+    const targetVersion = vulnerablePattern.slice(1)
+    return compareVersions(currentVersion, targetVersion) < 0
+  }
+  
+  return currentVersion === vulnerablePattern
+}
+
+function compareVersions(a: string, b: string): number {
+  const aParts = a.split('.').map(Number)
+  const bParts = b.split('.').map(Number)
+  
+  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+    const aPart = aParts[i] || 0
+    const bPart = bParts[i] || 0
+    
+    if (aPart < bPart) return -1
+    if (aPart > bPart) return 1
+  }
+  
+  return 0
+}
+
+function extractVersionFromContent(content: string, packageName: string): string | null {
+  const versionPatterns = [
+    new RegExp(`${packageName}[\\s"']*(\\d+(?:\\.\\d+)*)`, 'i'),
+    new RegExp(`version[\\s:"']*(\\d+(?:\\.\\d+)*)`, 'i')
+  ]
+  
+  for (const pattern of versionPatterns) {
+    const match = content.match(pattern)
+    if (match) return match[1]
+  }
+  
+  return null
+}
+
+function checkInlineVulnerabilities(packageName: string, version: string, vulnerabilities: VulnerabilityInfo[]) {
+  const packageVulns = knownVulnerabilities[packageName] || []
+  for (const vuln of packageVulns) {
+    if (isVersionVulnerable(version, vuln.version || '*')) {
+      vulnerabilities.push({
+        ...vuln,
+        version,
+        detectedIn: `Inline script analysis`
+      })
+    }
+  }
+}
+
 async function performSecurityScan(url: string): Promise<SecurityScanResult> {
   const checks: SecurityCheck[] = []
   
@@ -326,15 +530,76 @@ async function performSecurityScan(url: string): Promise<SecurityScanResult> {
         case 'Content Security':
           recommendations.push('Implement Content Security Policy and avoid mixed content')
           break
+        case 'Package Vulnerabilities':
+          recommendations.push('Update vulnerable packages to their latest secure versions')
+          break
       }
     }
   }
   
+  // Package Vulnerability Check
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) })
+    const html = await response.text()
+    
+    const vulnerabilityAnalysis = await analyzePackageVulnerabilities(html, url)
+    
+    let vulnStatus: SecurityCheck['status'] = 'pass'
+    let vulnMessage = 'No vulnerable packages detected'
+    
+    if (vulnerabilityAnalysis.summary.totalVulnerabilities > 0) {
+      const { critical, high, medium, low } = vulnerabilityAnalysis.summary
+      if (critical > 0) {
+        vulnStatus = 'fail'
+        vulnMessage = `${critical} critical vulnerabilities found in JavaScript packages`
+      } else if (high > 0) {
+        vulnStatus = 'fail'
+        vulnMessage = `${high} high severity vulnerabilities found in packages`
+      } else if (medium > 0) {
+        vulnStatus = 'warning'
+        vulnMessage = `${medium} medium severity vulnerabilities found`
+      } else {
+        vulnStatus = 'warning'
+        vulnMessage = `${low} low severity vulnerabilities found`
+      }
+    }
+    
+    checks.push({
+      name: 'Package Vulnerabilities',
+      status: vulnStatus,
+      message: vulnMessage,
+      details: vulnerabilityAnalysis
+    })
+    
+  } catch (error: any) {
+    checks.push({
+      name: 'Package Vulnerabilities',
+      status: 'error',
+      message: `Vulnerability check failed: ${error.message}`,
+      details: { errorType: error.name, errorMessage: error.message }
+    })
+  }
+  
+  // Recalculate overall status and score with vulnerability check included
+  const passCount = checks.filter(c => c.status === 'pass').length
+  const warnCount = checks.filter(c => c.status === 'warning').length
+  const failCount = checks.filter(c => c.status === 'fail').length
+  const errorCount = checks.filter(c => c.status === 'error').length
+  
+  const totalChecks = checks.length
+  const finalScore = Math.round(((passCount + (warnCount * 0.5)) / totalChecks) * 100)
+  
+  let finalOverallStatus: SecurityScanResult['overallStatus']
+  if (errorCount > 0) finalOverallStatus = 'error'
+  else if (failCount > 0) finalOverallStatus = 'vulnerable'
+  else if (warnCount > 0) finalOverallStatus = 'warnings'
+  else finalOverallStatus = 'secure'
+  
   return {
     url,
     scannedAt: new Date().toISOString(),
-    overallStatus,
-    score,
+    overallStatus: finalOverallStatus,
+    score: finalScore,
     checks,
     recommendations: Array.from(new Set(recommendations))
   }

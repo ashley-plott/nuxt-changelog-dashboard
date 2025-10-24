@@ -264,6 +264,79 @@ async function testSecurityScan(url: string): Promise<SecurityCheck[]> {
     })
   }
   
+  // Package Vulnerability Check (simplified for test scan)
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    const html = await response.text()
+    
+    const vulnerablePackages = []
+    let totalVulns = 0
+    
+    // Quick check for common vulnerable libraries in script tags
+    const scriptMatches = html.match(/<script[^>]*src=["']([^"']+)["'][^>]*>/gi) || []
+    for (const script of scriptMatches) {
+      const srcMatch = script.match(/src=["']([^"']+)["']/)
+      if (srcMatch) {
+        const scriptUrl = srcMatch[1].toLowerCase()
+        
+        // Check for known vulnerable library patterns
+        if (scriptUrl.includes('jquery') && (scriptUrl.includes('2.') || scriptUrl.includes('3.0') || scriptUrl.includes('3.1') || scriptUrl.includes('3.2') || scriptUrl.includes('3.3') || scriptUrl.includes('3.4'))) {
+          vulnerablePackages.push('jQuery (potentially vulnerable version detected)')
+          totalVulns++
+        }
+        if (scriptUrl.includes('lodash') && scriptUrl.includes('4.17.1')) {
+          vulnerablePackages.push('Lodash (vulnerable version 4.17.1x detected)')
+          totalVulns++
+        }
+        if (scriptUrl.includes('bootstrap') && (scriptUrl.includes('3.') || scriptUrl.includes('4.0') || scriptUrl.includes('4.1.0') || scriptUrl.includes('4.1.1'))) {
+          vulnerablePackages.push('Bootstrap (potentially vulnerable version detected)')
+          totalVulns++
+        }
+        if (scriptUrl.includes('moment') && !scriptUrl.includes('dayjs')) {
+          vulnerablePackages.push('Moment.js (deprecated library with known issues)')
+          totalVulns++
+        }
+        if (scriptUrl.includes('angular') && scriptUrl.includes('1.')) {
+          vulnerablePackages.push('AngularJS 1.x (end-of-life with security issues)')
+          totalVulns++
+        }
+      }
+    }
+    
+    let vulnStatus: 'pass' | 'warning' | 'fail' = 'pass'
+    let vulnMessage = 'No vulnerable packages detected'
+    
+    if (totalVulns > 0) {
+      if (totalVulns >= 3) {
+        vulnStatus = 'fail'
+        vulnMessage = `Multiple vulnerable packages detected (${totalVulns})`
+      } else {
+        vulnStatus = 'warning'
+        vulnMessage = `${totalVulns} potentially vulnerable package${totalVulns > 1 ? 's' : ''} detected`
+      }
+    }
+    
+    checks.push({
+      name: 'Package Vulnerabilities',
+      status: vulnStatus,
+      message: vulnMessage,
+      details: {
+        vulnerablePackages,
+        totalVulnerabilities: totalVulns,
+        detectionMethod: 'CDN script analysis',
+        note: 'This is a simplified check. Full vulnerability assessment requires deeper analysis.'
+      }
+    })
+    
+  } catch (error: any) {
+    checks.push({
+      name: 'Package Vulnerabilities',
+      status: 'error',
+      message: `Vulnerability check failed: ${error.message}`,
+      details: { errorType: error.name, errorMessage: error.message }
+    })
+  }
+  
   return checks
 }
 
