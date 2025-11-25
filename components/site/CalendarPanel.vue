@@ -363,6 +363,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                       </li>
                       <li class="flex items-start gap-2">
                         <span class="text-slate-400 mt-0.5">•</span>
+                        <span>Check HTACCESS file</span>
+                      </li>
+                      <li class="flex items-start gap-2">
+                        <span class="text-slate-400 mt-0.5">•</span>
                         <span>All Form(s) Check (Live Only) {{ ev.labels?.preRenewal || ev.labels?.midYear ? '- Use group email' : '' }}</span>
                       </li>
                       <li class="flex items-start gap-2">
