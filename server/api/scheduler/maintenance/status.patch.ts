@@ -3,6 +3,7 @@ import { defineEventHandler, readBody, createError } from 'h3'
 import { getDb } from '../../../utils/mongo'
 import { sendMail } from '../../../utils/postmark'
 import { sendCompletionEmail } from '../../../utils/notifications'
+import { requireUser } from '../../../utils/session'
 
 type MaintStatus =
   | 'To-Do' | 'In Progress' | 'Awaiting Form Conf'
@@ -115,6 +116,9 @@ async function sendStatusUpdateEmail(opts: {
 }
 
 export default defineEventHandler(async (event) => {
+  // Require authentication - any logged-in user can change status
+  const user = await requireUser(event)
+  
   try {
     const { siteId, env, date, status, from, by } = await readBody<{
       siteId: string; env: string; date: string; status: MaintStatus

@@ -64,7 +64,8 @@ const renewMonthName = computed(() => {
   const month = (site.value?.renewMonth || 1) - 1
   return new Date(2000, Math.max(0, Math.min(11, month)), 1).toLocaleString(undefined, { month: 'long' })
 })
-const canManageSite = computed(() => authed && (my?.role==='admin'||my?.role==='manager'))
+// All authenticated users can change status and trigger notifications
+const canManageSite = computed(() => authed)
 const counts = computed(() => ({
   calendar: items.value.length, changelog: undefined, forms: undefined, notes: undefined
 }))
@@ -130,10 +131,10 @@ watch([repoSlug, () => site.value?.env], async ([slug, env]) => {
 }, { immediate: true })
 
 // ====== Actions passed down ======
-// pages/site/[id].vue
+// All logged-in users can change status and trigger notifications
 async function setItemStatus(ev, next) {
   if (!canManageSite.value) return
-  // include actor + previous status
+  // Status endpoint handles history tracking and sends email notification to groupEmail
   await $fetch('/api/scheduler/maintenance/status', {
     method: 'PATCH',
     body: {
@@ -145,35 +146,13 @@ async function setItemStatus(ev, next) {
       by: my ? { id: my.id, name: my.name, email: my.email } : null
     },
     headers
-  }).catch((e) => { console.error('status failed:', e) })
-
-  // keep audit as best-effort (optional)
-  await $fetch('/api/scheduler/maintenance/audit', {
-    method: 'POST',
-    body: {
-      siteId: ev.site.id, env: ev.site.env, date: ev.date,
-      from: ev.status ?? null, to: next,
-      by: my ? { id: my.id, name: my.name, email: my.email } : null,
-      at: new Date()
-    },
-    headers
-  }).catch((e) => { console.error('audit failed:', e) })
+  }).catch((e) => { console.error('status update failed:', e) })
 
   await refreshSite()
 }
 
 async function recordStatusChange(payload: any) {
-  if (!payload?.item) return
-  try {
-    await $fetch('/api/scheduler/maintenance/audit', {
-      method: 'POST',
-      body: {
-        siteId: payload.item.site.id, env: payload.item.site.env, date: payload.item.date,
-        from: payload.from ?? null, to: payload.to, by: payload.by, at: payload.at || new Date(),
-      },
-      headers
-    })
-  } catch {}
+  // Status updates are now handled by setItemStatus which triggers notifications
   await refreshSite()
 }
 function copyToClipboard(text: string){
